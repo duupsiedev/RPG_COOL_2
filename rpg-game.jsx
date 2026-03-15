@@ -690,7 +690,7 @@ export default function RPGGame() {
 
     } else if (move.type === "regen") {
       // Inner Focus — apply/extend Regen status
-      const regenVal = Math.floor(eff(p, "mnd") * 0.3);
+      const regenVal = Math.floor(eff(p, "mnd") * 0.5);
       p = applyEffect(p, "regen", regenVal);
       const currentTurns = p.statusEffects.find(s => s.type === "regen")?.turns || 3;
       logs.push(`☯️ ${move.name}: Regen ${regenVal}/turn (${currentTurns} turns)`);
@@ -728,7 +728,7 @@ export default function RPGGame() {
         triggerShake("enemy");
 
         if (move.effect === "burn")  { e = applyEffect(e, "burn",  Math.max(1, Math.floor(eff(p,"spr")*0.25))); logs.push("🔥 Burn applied!"); }
-        if (move.effect === "bleed") { e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk")*0.25))); logs.push("🩸 Bleed applied!"); }
+        if (move.effect === "bleed") { e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk")*0.35))); logs.push("🩸 Bleed applied!"); }
         if (move.effect === "stun" && Math.random() < 0.4) { e = applyEffect(e, "stun", 0); logs.push("💫 Enemy stunned!"); }
         if (move.effect === "drain") {
           const h = Math.floor(totalDmg * 0.6);

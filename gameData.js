@@ -20,9 +20,9 @@ export const CLASSES = [
     stats: { atk: 14, def: 8, spr: 8, mnd: 8, agi: 12 },
     moves: [
       { id: "quick_shot",  name: "Quick Shot",  type: "atk", dmgType: "physical", power: 1.0, manaCost: 0,  desc: "A fast arrow shot." },
-      { id: "bleed_arrow", name: "Bleed Arrow", type: "atk", dmgType: "physical", power: 1.2, manaCost: 15, effect: "bleed", desc: "Arrow causing bleeding. Scales with ATK." },
+      { id: "bleed_arrow", name: "Bleed Arrow", type: "atk", dmgType: "physical", power: 1.3, manaCost: 15, effect: "bleed", desc: "Arrow causing bleeding. Scales with ATK." },
       { id: "dodge_roll",  name: "Dodge Roll",  type: "def", dmgType: "physical", power: 1.0, manaCost: 10, desc: "Evasive roll, scales with DEF+MND." },
-      { id: "double_shot", name: "Double Shot", type: "atk", dmgType: "physical", power: 1.0, manaCost: 15, hits: 2, desc: "Two rapid arrow shots." },
+      { id: "double_shot", name: "Double Shot", type: "atk", dmgType: "physical", power: 1.1, manaCost: 15, hits: 2, desc: "Two rapid arrow shots." },
     ],
     passive: { name: "Predator", desc: "Heals for bleed damage dealt each turn" },
   },
