@@ -5,7 +5,7 @@
 
 export const CLASSES = [
   {
-    key: "knight", name: "Knight", icon: "⚔️", color: "#c0392b", baseScaling: 3,
+    key: "knight", name: "Knight", icon: "⚔️", color: "#c0392b", baseScaling: 3, hpScaling: 1.6,
     stats: { atk: 14, def: 16, spr: 5, mnd: 5, agi: 10 },
     moves: [
       { id: "slash",        name: "Slash",        type: "atk", dmgType: "physical", power: 1.0, manaCost: 0,  desc: "A basic sword strike." },
@@ -16,7 +16,7 @@ export const CLASSES = [
     passive: { name: "Grit", desc: "Heal at turn start: 10 + 10% MND" },
   },
   {
-    key: "ranger", name: "Ranger", icon: "🏹", color: "#27ae60", baseScaling: 3,
+    key: "ranger", name: "Ranger", icon: "🏹", color: "#27ae60", baseScaling: 3, hpScaling: 1.3,
     stats: { atk: 14, def: 8, spr: 8, mnd: 8, agi: 12 },
     moves: [
       { id: "quick_shot",  name: "Quick Shot",  type: "atk", dmgType: "physical", power: 1.0, manaCost: 0,  desc: "A fast arrow shot." },
@@ -27,7 +27,7 @@ export const CLASSES = [
     passive: { name: "Predator", desc: "Heals for bleed damage dealt each turn" },
   },
   {
-    key: "mage", name: "Mage", icon: "🔮", color: "#8e44ad", baseScaling: 2,
+    key: "mage", name: "Mage", icon: "🔮", color: "#8e44ad", baseScaling: 2, hpScaling: 1.1,
     stats: { atk: 6, def: 6, spr: 14, mnd: 18, agi: 6 },
     moves: [
       { id: "magic_bolt",  name: "Magic Bolt",  type: "atk", dmgType: "magical", power: 1.0, manaCost: 0,  desc: "A bolt of raw arcane energy." },
@@ -38,7 +38,7 @@ export const CLASSES = [
     passive: { name: "Knowledge", desc: "+1 SPR every 5 wins" },
   },
   {
-    key: "thief", name: "Thief", icon: "🗡️", color: "#f39c12", baseScaling: 3,
+    key: "thief", name: "Thief", icon: "🗡️", color: "#f39c12", baseScaling: 3, hpScaling: 1.2,
     stats: { atk: 16, def: 6, spr: 8, mnd: 6, agi: 14 },
     moves: [
       { id: "stab",         name: "Stab",         type: "atk", dmgType: "physical", power: 1.0, manaCost: 0,  desc: "A quick dagger thrust." },
@@ -49,7 +49,7 @@ export const CLASSES = [
     passive: { name: "Pickpocket", desc: "Heal 5% enemy max HP on kill" },
   },
   {
-    key: "druid", name: "Druid", icon: "🌿", color: "#16a085", baseScaling: 2,
+    key: "druid", name: "Druid", icon: "🌿", color: "#16a085", baseScaling: 2, hpScaling: 1.4,
     stats: { atk: 6, def: 10, spr: 18, mnd: 10, agi: 6 },
     moves: [
       { id: "thorn_whip", name: "Thorn Whip", type: "atk", dmgType: "magical",  power: 1.0, manaCost: 0,  desc: "Lashing vines strike." },
@@ -60,7 +60,7 @@ export const CLASSES = [
     passive: { name: "Nature", desc: "+1 to a random stat every win" },
   },
   {
-    key: "monk", name: "Monk", icon: "🥋", color: "#e67e22", baseScaling: 2,
+    key: "monk", name: "Monk", icon: "🥋", color: "#e67e22", baseScaling: 2, hpScaling: 1.5,
     stats: { atk: 6, def: 8, spr: 8, mnd: 16, agi: 12 },
     moves: [
       { id: "palm_strike",  name: "Palm Strike",  type: "atk", dmgType: "chi",     power: 1.0, manaCost: 0,  desc: "Focused chi strike. Scales MND, hits physical DEF." },

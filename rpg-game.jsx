@@ -799,7 +799,8 @@ export default function RPGGame() {
           ns[s] += g; desc.push(`${s.toUpperCase()}+${g}`);
         });
         p.stats = ns;
-        p.maxHp += 15; p.hp = Math.min(p.maxHp, p.hp + Math.floor(p.maxHp * 0.5));
+        const hpGain = Math.floor(15 * (getClass(p.classKey).hpScaling || 1));
+        p.maxHp += hpGain; p.hp = Math.min(p.maxHp, p.hp + Math.floor(p.maxHp * 0.5));
         p.skillPoints = (p.skillPoints || 0) + 2;
         logs.push(`🎉 LEVEL UP → ${p.level}! ${desc.join(" ")} +2 SP`);
       }
