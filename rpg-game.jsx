@@ -11,7 +11,9 @@ const SAVE_KEY = "realm_of_echoes_save_v1";
 // ============================================================
 
 function scaleEnemy(template, wins, playerLevel = 1) {
-  const winMult = Math.pow(1.015, wins);
+  const winMult = wins <= 50
+  ? Math.pow(1.015, wins)
+  : Math.pow(1.015, 50) * Math.pow(1.025, wins - 50);
   const lvlMult = Math.pow(1.12, playerLevel - 1);
   const s = winMult * lvlMult;
   const rewardMult = winMult * Math.pow(1.08, playerLevel - 1);
