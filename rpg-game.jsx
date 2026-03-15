@@ -577,7 +577,7 @@ function RunSummary({ player, enemy, onMenu }) {
           <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: 2, marginBottom: 8 }}>Final Stats</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11 }}>
             {["atk","def","spr","mnd","agi"].map(s => (
-              <span key={s} style={{ color: "#777" }}>{s.toUpperCase()} <span style={{ color: "#aaa", fontWeight: 700 }}>{player.stats[s]}</span></span>
+              <span key={s} style={{ color: "#777" }}>{s.toUpperCase()} <span style={{ color: "#aaa", fontWeight: 700 }}>{eff(player, s)}</span></span>
             ))}
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 6, fontSize: 11, color: "#555" }}>
@@ -800,7 +800,8 @@ export default function RPGGame() {
       while (p.exp >= p.expToNext) {
         p.exp -= p.expToNext; p.level += 1;
         p.expToNext = Math.floor(p.expToNext * 1.4);
-        const base = getClass(p.classKey).stats;
+        const baseStats = getClass(p.classKey).stats;
+        const secondStats = p.multiclassKey ? getClass(p.multiclassKey).stats : null;
         const pctBonus = 0.02 * (p.level - 1);
         const scalingMult = p.combinedScaling
           ? p.combinedScaling / getClass(p.classKey).baseScaling
@@ -808,7 +809,11 @@ export default function RPGGame() {
         const ns = { ...p.stats };
         const desc = [];
         Object.keys(ns).forEach(s => {
-          const g = Math.ceil(base[s] * (0.25 + pctBonus) * scalingMult);
+          // Blend base stats: average of both classes if multiclassed, else just base
+          const blendedBase = secondStats
+            ? (baseStats[s] + secondStats[s]) / 2
+            : baseStats[s];
+          const g = Math.ceil(blendedBase * (0.25 + pctBonus) * scalingMult);
           ns[s] += g; desc.push(`${s.toUpperCase()}+${g}`);
         });
         p.stats = ns;
