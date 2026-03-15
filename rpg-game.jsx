@@ -86,7 +86,14 @@ function calcVoidDmg(mnd, enemyMnd, power) {
   const raw = mnd * power * (1 - reduction * 0.8);
   return Math.max(Math.floor(mnd * 0.05), Math.floor(raw));
 }
-function calcHeal(mnd)                { return Math.floor(mnd * 1.6 + 12); }
+function calcHeal(mnd) { return Math.floor(mnd * 1.6 + 12); }
+
+// Serenity: regen ticks = 50%, all other heals = 20%
+function serenityProc(player, healAmt, isRegen = false) {
+  const hasMonk = player.classKey === "monk" || player.multiclassKey === "monk";
+  if (!hasMonk || healAmt <= 0) return 0;
+  return Math.floor(healAmt * (isRegen ? 0.5 : 0.2));
+}
 
 function agiCheck(atkAgi, defAgi) {
   const crit  = Math.max(0.05, Math.min(0.50, (atkAgi - defAgi) * 0.008 + 0.15));
@@ -687,6 +694,8 @@ export default function RPGGame() {
       logs.push(`💚 ${move.name}: Healed ${h} HP`);
       spawnFloat(`+${h}`, "#2ecc71", "player");
       p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
+      const sd = serenityProc(p, h);
+      if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
 
     } else if (move.type === "regen") {
       // Inner Focus — apply/extend Regen status
@@ -736,6 +745,8 @@ export default function RPGGame() {
           logs.push(`💜 Drain: Healed ${h} HP`);
           spawnFloat(`+${h}`, "#2ecc71", "player");
           p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
+          const sd = serenityProc(p, h);
+          if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
         }
       }
     }
@@ -759,6 +770,8 @@ export default function RPGGame() {
           const h = Math.floor(e.maxHp * 0.05 * mult);
           p.hp = Math.min(p.maxHp, p.hp + h);
           logs.push(`🗡️ Pickpocket: +${h} HP`);
+          const sd = serenityProc(p, h);
+          if (sd > 0) { e.hp = Math.max(0, e.hp - sd); logs.push(`☯️ Serenity: ${sd} dmg`); }
         }
         if (pk === "druid") {
           const rolls = isSpec && pk === p.classKey ? 2 : 1;
@@ -830,6 +843,8 @@ export default function RPGGame() {
       if (hasRanger && eTick.bleedHeal > 0) {
         p2.hp = Math.min(p2.maxHp, p2.hp + eTick.bleedHeal);
         eLogs.push(`🏹 Predator: +${eTick.bleedHeal} HP`);
+        const sd = serenityProc(p2, eTick.bleedHeal);
+        if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
       }
 
       // Enemy died from status
@@ -842,6 +857,8 @@ export default function RPGGame() {
           const mult = p2.isSpecialized ? 2 : 1;
           const h = Math.floor(e2.maxHp * 0.05 * mult);
           p2.hp = Math.min(p2.maxHp, p2.hp + h);
+          const sd = serenityProc(p2, h);
+          if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); eLogs.push(`☯️ Serenity: ${sd} dmg`); }
         }
         addLog(...eLogs);
         setLastReward({ gold, exp });
@@ -861,33 +878,28 @@ export default function RPGGame() {
           p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + h };
           eLogs.push(`⚔️ Grit: +${h} HP`);
           spawnFloat(`+${h}`, "#2ecc71", "player");
+          const sd = serenityProc(p2, h);
+          if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
         }
 
-        // Ranger Predator passive (bleed heal already handled above in eTick)
-        // but we need to double it for spec/multi
+        // Ranger Predator passive
         if (p2.isSpecialized && p2.classKey === "ranger" && eTick.bleedHeal > 0) {
-          p2.hp = Math.min(p2.maxHp, p2.hp + eTick.bleedHeal); // second proc
+          p2.hp = Math.min(p2.maxHp, p2.hp + eTick.bleedHeal);
           eLogs.push(`🏹 Predator (×2): +${eTick.bleedHeal} HP`);
+          const sd = serenityProc(p2, eTick.bleedHeal);
+          if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
         }
 
         // Tick player status
         const pTick = tickStatus(p2);
         p2 = pTick.target; eLogs.push(...pTick.logs);
 
-        // Apply Regen healing to player
         if (pTick.regenHeal > 0) {
           p2.hp = Math.min(p2.maxHp, p2.hp + pTick.regenHeal);
           p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + pTick.regenHeal };
           spawnFloat(`+${pTick.regenHeal}`, "#2ecc71", "player");
-          // Serenity passive — Monk deals 50% of regen as damage
-          const hasMonk = p2.classKey === "monk" || p2.multiclassKey === "monk";
-          if (hasMonk) {
-            const serenityDmg = Math.floor(pTick.regenHeal * 0.5);
-            e2.hp = Math.max(0, e2.hp - serenityDmg);
-            p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + serenityDmg };
-            eLogs.push(`☯️ Serenity: ${serenityDmg} dmg`);
-            spawnFloat(`${serenityDmg}`, "#e67e22", "enemy");
-          }
+          const sd = serenityProc(p2, pTick.regenHeal, true);
+          if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); spawnFloat(`${sd}`, "#e67e22", "enemy"); }
         }
 
         if (p2.hp > 0) {
