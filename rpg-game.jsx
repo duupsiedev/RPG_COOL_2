@@ -727,8 +727,8 @@ export default function RPGGame() {
   const [shakeEnemy, setShakeEnemy]     = useState(false);
   const floatIdRef = useRef(0);
 
-  // Auto-save whenever player state changes
-  useEffect(() => { if (player) saveGame(player); }, [player]);
+  // Auto-save whenever player state changes — never save a dead player
+  useEffect(() => { if (player && player.hp > 0) saveGame(player); }, [player]);
 
   const saveExists = hasSave();
   const rawSave    = loadGame();
