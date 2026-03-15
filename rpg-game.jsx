@@ -801,7 +801,7 @@ export default function RPGGame() {
       // Level up
       while (p.exp >= p.expToNext) {
         p.exp -= p.expToNext; p.level += 1;
-        p.expToNext = Math.floor(p.expToNext * 1.4);
+        p.expToNext = Math.floor(p.expToNext * 1.30);
         const baseStats = getClass(p.classKey).stats;
         const secondStats = p.multiclassKey ? getClass(p.multiclassKey).stats : null;
         const pctBonus = 0.02 * (p.level - 1);
