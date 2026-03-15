@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+const SAVE_KEY = "realm_of_echoes_save_v1";
 
 // ============================================================
 // GAME DATA — CLASSES as array, key field for lookup
