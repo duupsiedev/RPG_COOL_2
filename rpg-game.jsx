@@ -150,7 +150,7 @@ function applyMulticlass(player, secondClassKey) {
 // ============================================================
 
 function scaleEnemy(template, wins, playerLevel = 1) {
-  const winMult = 1 + wins * 0.01;
+  const winMult = Math.pow(1.015, wins);
   const lvlMult = Math.pow(1.12, playerLevel - 1);
   const s = winMult * lvlMult;
   const rewardMult = winMult * Math.pow(1.08, playerLevel - 1);
@@ -183,9 +183,11 @@ function initPlayer(classKey) {
     bonusFlat: { atk: 0, def: 0, spr: 0, mnd: 0, agi: 0 },
     bonusPct:  { atk: 0, def: 0, spr: 0, mnd: 0, agi: 0 },
     shopLevels:{ atk: 0, def: 0, spr: 0, mnd: 0, agi: 0 },
+    shopLevelsT2:{ atk: 0, def: 0, spr: 0, mnd: 0, agi: 0 },
     shopTier:  { atk: 1, def: 1, spr: 1, mnd: 1, agi: 1 },
     statusEffects: [], passiveWins: 0, shield: 0,
     skillPoints: 0, skills: { xpBonus: 0, goldBonus: 0, statBonus: 0 },
+    runStats: { dmgDealt: 0, dmgReceived: 0, dmgHealed: 0, killedBy: null },
   };
 }
 
@@ -362,11 +364,23 @@ function ShopScreen({ player, setPlayer, setScreen }) {
 
   function buyItem(item, tier) {
     const td  = tier === 2 ? item.t2 : item.t1;
-    const lvl = player.shopLevels[item.stat];
+    const lvlKey = tier === 2 ? "shopLevelsT2" : "shopLevels";
+    const lvl = (player[lvlKey] || {})[item.stat] || 0;
     const price = Math.floor(td.price * Math.pow(1.2, lvl));
     if (player.gold < price) return;
-    const p = { ...player, bonusFlat: { ...player.bonusFlat }, bonusPct: { ...player.bonusPct }, shopLevels: { ...player.shopLevels }, shopTier: { ...player.shopTier } };
-    p.gold -= price; p.bonusFlat[item.stat] += td.flat; p.bonusPct[item.stat] += td.pct; p.shopLevels[item.stat] += 1; p.shopTier[item.stat] = tier;
+    const p = {
+      ...player,
+      bonusFlat: { ...player.bonusFlat },
+      bonusPct:  { ...player.bonusPct },
+      shopLevels:   { ...player.shopLevels },
+      shopLevelsT2: { ...(player.shopLevelsT2 || { atk:0,def:0,spr:0,mnd:0,agi:0 }) },
+      shopTier: { ...player.shopTier },
+    };
+    p.gold -= price;
+    p.bonusFlat[item.stat] += td.flat;
+    p.bonusPct[item.stat]  += td.pct;
+    p[lvlKey][item.stat] += 1;
+    p.shopTier[item.stat] = tier;
     setPlayer(p);
   }
 
@@ -403,15 +417,16 @@ function ShopScreen({ player, setPlayer, setScreen }) {
         {tab === "shop" && (
           <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
             {SHOP_ITEMS.map(item => {
-              const lvl = player.shopLevels[item.stat];
-              const t1p = Math.floor(item.t1.price * Math.pow(1.2, lvl));
-              const t2p = Math.floor(item.t2.price * Math.pow(1.2, lvl));
+              const lvl1 = player.shopLevels[item.stat] || 0;
+              const lvl2 = (player.shopLevelsT2 || {})[item.stat] || 0;
+              const t1p = Math.floor(item.t1.price * Math.pow(1.2, lvl1));
+              const t2p = Math.floor(item.t2.price * Math.pow(1.2, lvl2));
               return (
                 <div key={item.id} style={{ background: "#0e0e18", border: "1px solid #1e1e2e", borderRadius: 10, padding: "10px 14px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
                     <div style={{ fontSize: 20 }}>{item.icon}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>{item.name} <span style={{ color: "#555", fontSize: 10 }}>Lv.{lvl}</span></div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{item.name} <span style={{ color: "#555", fontSize: 10 }}>T1 Lv.{lvl1} · T2 Lv.{lvl2}</span></div>
                       <div style={{ fontSize: 10, color: "#666" }}>{item.stat.toUpperCase()} {eff(player, item.stat)} (+{player.bonusFlat[item.stat]} flat, +{player.bonusPct[item.stat]}%)</div>
                     </div>
                   </div>
@@ -627,6 +642,73 @@ function MulticlassScreen({ player, onSelect }) {
 }
 
 // ============================================================
+// RUN SUMMARY
+// ============================================================
+
+function RunSummary({ player, enemy, onMenu }) {
+  const cls = getClass(player.classKey);
+  const rs = player.runStats || {};
+  const className = player.multiclassName || cls.name;
+  const classIcon = player.multiclassIcon || cls.icon;
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#07070f", fontFamily: "Georgia, serif", color: "#eee", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
+      <div style={{ maxWidth: 400, width: "100%" }}>
+        {/* Header */}
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>💀</div>
+          <h1 style={{ margin: 0, fontSize: 22, color: "#e74c3c", letterSpacing: 3, textTransform: "uppercase", fontWeight: 900 }}>Defeated</h1>
+          <div style={{ color: "#555", fontSize: 12, marginTop: 6 }}>
+            {classIcon} {className} · Level {player.level} · {player.wins} wins
+          </div>
+        </div>
+
+        {/* Killed by */}
+        {rs.killedBy && (
+          <div style={{ background: "#1a0808", border: "1px solid #c0392b44", borderRadius: 10, padding: "10px 14px", marginBottom: 12, textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4 }}>Killed by</div>
+            <div style={{ fontWeight: 800, color: "#e74c3c", fontSize: 15 }}>{rs.killedBy}</div>
+            <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>on win {player.wins}</div>
+          </div>
+        )}
+
+        {/* Stats grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
+          {[
+            { label: "Damage Dealt",    value: (rs.dmgDealt    || 0).toLocaleString(), color: "#e74c3c", icon: "⚔️" },
+            { label: "Damage Received", value: (rs.dmgReceived || 0).toLocaleString(), color: "#f97316", icon: "🛡️" },
+            { label: "Healing Done",    value: (rs.dmgHealed   || 0).toLocaleString(), color: "#2ecc71", icon: "💚" },
+          ].map(s => (
+            <div key={s.label} style={{ background: "#0e0e18", border: `1px solid ${s.color}33`, borderRadius: 10, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontSize: 18, marginBottom: 4 }}>{s.icon}</div>
+              <div style={{ fontWeight: 800, fontSize: 14, color: s.color }}>{s.value}</div>
+              <div style={{ fontSize: 9, color: "#555", marginTop: 3, textTransform: "uppercase", letterSpacing: 1 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Final stats */}
+        <div style={{ background: "#0e0e18", border: "1px solid #1e1e2e", borderRadius: 10, padding: "10px 14px", marginBottom: 20 }}>
+          <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: 2, marginBottom: 8 }}>Final Stats</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11 }}>
+            {["atk","def","spr","mnd","agi"].map(s => (
+              <span key={s} style={{ color: "#777" }}>{s.toUpperCase()} <span style={{ color: "#aaa", fontWeight: 700 }}>{player.stats[s]}</span></span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 6, fontSize: 11, color: "#555" }}>
+            <span>💰 {player.gold}g earned</span>
+          </div>
+        </div>
+
+        <button onClick={onMenu} style={{ width: "100%", padding: 14, background: "#c0392b22", border: "2px solid #c0392b", borderRadius: 10, color: "#c0392b", fontSize: 15, fontWeight: 800, cursor: "pointer", letterSpacing: 1 }}>
+          ↩ Main Menu
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN GAME COMPONENT
 // ============================================================
 
@@ -639,6 +721,7 @@ export default function RPGGame() {
   const [phase, setPhase]           = useState("active");
   const [busy, setBusy]             = useState(false);
   const [lastReward, setLastReward] = useState(null);
+  const [runSummary, setRunSummary] = useState(null);
   const [floatingNums, setFloatingNums] = useState([]);
   const [shakePlayer, setShakePlayer]   = useState(false);
   const [shakeEnemy, setShakeEnemy]     = useState(false);
@@ -725,6 +808,7 @@ export default function RPGGame() {
       p.hp = Math.min(p.maxHp, p.hp + h);
       logs.push(`💚 ${move.name}: Healed ${h} HP`);
       spawnFloat(`+${h}`, "#2ecc71", "player");
+      p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
 
     } else if (move.type === "def") {
       const shield = Math.floor(eff(p, "def") * 0.6 + eff(p, "mnd") * 0.4);
@@ -748,6 +832,7 @@ export default function RPGGame() {
           totalDmg += d;
         }
         e.hp = Math.max(0, e.hp - totalDmg);
+        p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + totalDmg };
         logs.push(`${crit ? "⚡ CRIT! " : ""}${move.name}: ${totalDmg} dmg${hits > 1 ? ` (${hits}×)` : ""}`);
         const isMag  = move.dmgType === "magical";
         const fcol   = crit ? (isMag ? "#f97316" : "#e74c3c") : (isMag ? "#e8c070" : "#ffffff");
@@ -762,6 +847,7 @@ export default function RPGGame() {
           p.hp = Math.min(p.maxHp, p.hp + h);
           logs.push(`💜 Drain: Healed ${h} HP`);
           spawnFloat(`+${h}`, "#2ecc71", "player");
+          p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
         }
       }
     }
@@ -844,7 +930,7 @@ export default function RPGGame() {
 
     // Enemy turn
     setTimeout(() => {
-      let p2 = { ...p, statusEffects: [...(p.statusEffects || [])], stats: { ...p.stats } };
+      let p2 = { ...p, statusEffects: [...(p.statusEffects || [])], stats: { ...p.stats }, runStats: { ...(p.runStats || {}) } };
       let e2 = { ...e, statusEffects: [...(e.statusEffects || [])] };
       const eLogs = [];
 
@@ -883,6 +969,7 @@ export default function RPGGame() {
           const mult = p2.isSpecialized ? 2 : knightPassiveCount;
           const h = Math.floor((10 + eff(p2,"mnd") * 0.1) * mult);
           p2.hp = Math.min(p2.maxHp, p2.hp + h);
+          p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + h };
           eLogs.push(`⚔️ Grit: +${h} HP`);
           spawnFloat(`+${h}`, "#2ecc71", "player");
         }
@@ -924,6 +1011,7 @@ export default function RPGGame() {
                 spawnFloat(`-${blocked}`, "#3498db", "player");
               }
               p2.hp = Math.max(0, p2.hp - d);
+              p2.runStats = { ...p2.runStats, dmgReceived: (p2.runStats?.dmgReceived||0) + d, killedBy: p2.hp <= 0 ? `${e2.icon} ${mv.name}` : p2.runStats?.killedBy };
               eLogs.push(`${mv.isUlt ? "💥 " : ""}${crit ? "⚡ CRIT! " : ""}${e2.icon} ${mv.name}: ${d} dmg`);
               const isMag = dmgType === "magical";
               spawnFloat(crit ? `⚡${d}` : `${d}`, crit ? (isMag ? "#f97316" : "#e74c3c") : (isMag ? "#e8c070" : "#ffffff"), "player");
@@ -950,6 +1038,8 @@ export default function RPGGame() {
 
       if (p2.hp <= 0) {
         addLog(`💀 Defeated after ${p2.wins} wins at level ${p2.level}.`);
+        deleteSave();
+        setRunSummary({ player: p2, enemy: e2 });
         setPlayer(p2); setEnemy(e2); setPhase("defeat"); setBusy(false);
         return;
       }
@@ -969,6 +1059,10 @@ export default function RPGGame() {
 
   if (screen === "multiclass") {
     return <MulticlassScreen player={player} onSelect={handleMulticlass} />;
+  }
+
+  if (runSummary) {
+    return <RunSummary player={runSummary.player} enemy={runSummary.enemy} onMenu={() => { setRunSummary(null); setScreen("menu"); }} />;
   }
 
   if (screen === "shop") {
@@ -1100,15 +1194,6 @@ export default function RPGGame() {
           {phase === "victory" && (
             <div style={{ textAlign: "center", padding: "10px 0", color: "#27ae60", fontWeight: 800, fontSize: 15 }}>
               ✨ Victory! Next battle incoming...
-            </div>
-          )}
-
-          {phase === "defeat" && (
-            <div style={{ textAlign: "center", padding: "14px 0" }}>
-              <div style={{ fontSize: 24, marginBottom: 6 }}>💀</div>
-              <div style={{ color: "#e74c3c", fontWeight: 800, marginBottom: 4 }}>Defeated</div>
-              <div style={{ color: "#555", fontSize: 11, marginBottom: 14 }}>{player.wins} wins · Level {player.level}</div>
-              <button onClick={() => setScreen("menu")} style={{ background: "#c0392b22", border: "2px solid #c0392b", borderRadius: 9, color: "#c0392b", padding: "9px 18px", cursor: "pointer", fontWeight: 700 }}>↩ Main Menu</button>
             </div>
           )}
 
