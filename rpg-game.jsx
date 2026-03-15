@@ -76,6 +76,16 @@ function calcMagDmg(spr, mnd, power) {
   const raw = spr * power * (1 - reduction * 0.8);
   return Math.max(Math.floor(spr * 0.05), Math.floor(raw));
 }
+// Chi: scales MND but hits physical DEF (Palm Strike)
+function calcChiDmg(mnd, def, power) {
+  return calcPhysDmg(mnd, def, power);
+}
+// Void: scales MND, bypasses 80% of magic resistance (Void Strike)
+function calcVoidDmg(mnd, enemyMnd, power) {
+  const reduction = (enemyMnd * 0.2) / (enemyMnd * 0.2 + 50);
+  const raw = mnd * power * (1 - reduction * 0.8);
+  return Math.max(Math.floor(mnd * 0.05), Math.floor(raw));
+}
 function calcHeal(mnd)                { return Math.floor(mnd * 1.6 + 12); }
 
 function agiCheck(atkAgi, defAgi) {
@@ -85,23 +95,30 @@ function agiCheck(atkAgi, defAgi) {
 }
 
 function tickStatus(target) {
-  const logs = []; let bleedHeal = 0;
+  const logs = []; let bleedHeal = 0; let regenHeal = 0;
   const totalDmg = (target.statusEffects || []).reduce((s, e) =>
     (e.type === "burn" || e.type === "bleed") ? s + e.dmg : s, 0);
   const effects = (target.statusEffects || []).map(e => {
     if (e.type === "burn")  { logs.push(`🔥 Burn: ${e.dmg} dmg`);  return { ...e, turns: e.turns - 1 }; }
     if (e.type === "bleed") { bleedHeal += e.dmg; logs.push(`🩸 Bleed: ${e.dmg} dmg`); return { ...e, turns: e.turns - 1 }; }
+    if (e.type === "regen") { regenHeal += e.dmg; logs.push(`💚 Regen: +${e.dmg} HP`); return { ...e, turns: e.turns - 1 }; }
     return e;
   }).filter(e => e.turns > 0);
-  return { target: { ...target, hp: Math.max(0, target.hp - totalDmg), statusEffects: effects }, logs, bleedHeal };
+  return { target: { ...target, hp: Math.max(0, target.hp - totalDmg), statusEffects: effects }, logs, bleedHeal, regenHeal };
 }
 
 function applyEffect(target, effect, dmg) {
   const effects = [...(target.statusEffects || [])];
-  const turns = effect === "stun" ? 1 : 3;
+  const turns = effect === "stun" ? 1 : effect === "regen" ? 3 : 3;
   const idx = effects.findIndex(e => e.type === effect);
-  if (idx >= 0) effects[idx] = { ...effects[idx], turns, dmg };
-  else effects.push({ type: effect, turns, dmg });
+  if (effect === "regen" && idx >= 0) {
+    // Regen stacks turns, capped at 6
+    effects[idx] = { ...effects[idx], turns: Math.min(6, effects[idx].turns + 3), dmg };
+  } else if (idx >= 0) {
+    effects[idx] = { ...effects[idx], turns, dmg };
+  } else {
+    effects.push({ type: effect, turns, dmg });
+  }
   return { ...target, statusEffects: effects };
 }
 
@@ -138,8 +155,8 @@ function Bar({ val, max, color, label }) {
 }
 
 function Badge({ e }) {
-  const c  = e.type === "burn" ? "#e74c3c" : e.type === "bleed" ? "#c0392b" : "#f39c12";
-  const ic = e.type === "burn" ? "🔥" : e.type === "bleed" ? "🩸" : "💫";
+  const c  = e.type === "burn" ? "#e74c3c" : e.type === "bleed" ? "#c0392b" : e.type === "regen" ? "#2ecc71" : "#f39c12";
+  const ic = e.type === "burn" ? "🔥" : e.type === "bleed" ? "🩸" : e.type === "regen" ? "💚" : "💫";
   return (
     <span style={{ fontSize: 10, background: "#1a0a0a", border: `1px solid ${c}66`, borderRadius: 4, padding: "1px 5px", color: c, marginRight: 3 }}>
       {ic} {e.turns}t
@@ -671,6 +688,14 @@ export default function RPGGame() {
       spawnFloat(`+${h}`, "#2ecc71", "player");
       p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
 
+    } else if (move.type === "regen") {
+      // Inner Focus — apply/extend Regen status
+      const regenVal = Math.floor(eff(p, "mnd") * 0.3);
+      p = applyEffect(p, "regen", regenVal);
+      const currentTurns = p.statusEffects.find(s => s.type === "regen")?.turns || 3;
+      logs.push(`☯️ ${move.name}: Regen ${regenVal}/turn (${currentTurns} turns)`);
+      spawnFloat(`☯️`, "#e67e22", "player");
+
     } else if (move.type === "def") {
       const shield = Math.floor(eff(p, "def") * 0.6 + eff(p, "mnd") * 0.4);
       p.shield = (p.shield || 0) + shield;
@@ -686,16 +711,18 @@ export default function RPGGame() {
         const hits = move.hits || 1;
         let totalDmg = 0;
         for (let h = 0; h < hits; h++) {
-          let d = move.dmgType === "physical"
-            ? calcPhysDmg(eff(p, "atk"), e.def, move.power)
-            : calcMagDmg(eff(p, "spr"), e.mnd, move.power);
+          let d;
+          if (move.dmgType === "chi")       d = calcChiDmg(eff(p, "mnd"), e.def, move.power);
+          else if (move.dmgType === "void")  d = calcVoidDmg(eff(p, "mnd"), e.mnd, move.power);
+          else if (move.dmgType === "physical") d = calcPhysDmg(eff(p, "atk"), e.def, move.power);
+          else                               d = calcMagDmg(eff(p, "spr"), e.mnd, move.power);
           if (crit) d = Math.floor(d * 1.5);
           totalDmg += d;
         }
         e.hp = Math.max(0, e.hp - totalDmg);
         p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + totalDmg };
         logs.push(`${crit ? "⚡ CRIT! " : ""}${move.name}: ${totalDmg} dmg${hits > 1 ? ` (${hits}×)` : ""}`);
-        const isMag  = move.dmgType === "magical";
+        const isMag  = move.dmgType === "magical" || move.dmgType === "chi" || move.dmgType === "void";
         const fcol   = crit ? (isMag ? "#f97316" : "#e74c3c") : (isMag ? "#e8c070" : "#ffffff");
         spawnFloat(crit ? `⚡${totalDmg}` : `${totalDmg}`, fcol, "enemy");
         triggerShake("enemy");
@@ -845,6 +872,22 @@ export default function RPGGame() {
         // Tick player status
         const pTick = tickStatus(p2);
         p2 = pTick.target; eLogs.push(...pTick.logs);
+
+        // Apply Regen healing to player
+        if (pTick.regenHeal > 0) {
+          p2.hp = Math.min(p2.maxHp, p2.hp + pTick.regenHeal);
+          p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + pTick.regenHeal };
+          spawnFloat(`+${pTick.regenHeal}`, "#2ecc71", "player");
+          // Serenity passive — Monk deals 50% of regen as damage
+          const hasMonk = p2.classKey === "monk" || p2.multiclassKey === "monk";
+          if (hasMonk) {
+            const serenityDmg = Math.floor(pTick.regenHeal * 0.5);
+            e2.hp = Math.max(0, e2.hp - serenityDmg);
+            p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + serenityDmg };
+            eLogs.push(`☯️ Serenity: ${serenityDmg} dmg`);
+            spawnFloat(`${serenityDmg}`, "#e67e22", "enemy");
+          }
+        }
 
         if (p2.hp > 0) {
           const stunned = e2.statusEffects.some(s => s.type === "stun");

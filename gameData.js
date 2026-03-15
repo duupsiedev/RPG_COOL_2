@@ -59,6 +59,17 @@ export const CLASSES = [
     ],
     passive: { name: "Nature", desc: "+1 to a random stat every win" },
   },
+  {
+    key: "monk", name: "Monk", icon: "🥋", color: "#e67e22", baseScaling: 2,
+    stats: { atk: 6, def: 8, spr: 8, mnd: 16, agi: 12 },
+    moves: [
+      { id: "palm_strike",  name: "Palm Strike",  type: "atk", dmgType: "chi",     power: 1.0, manaCost: 0,  desc: "Focused chi strike. Scales MND, hits physical DEF." },
+      { id: "inner_focus",  name: "Inner Focus",  type: "regen", dmgType: "heal",  power: 0,   manaCost: 15, desc: "Apply Regen: heal MND×0.3 per turn for 3 turns. Max 6 turns." },
+      { id: "iron_body",    name: "Iron Body",    type: "def", dmgType: "physical", power: 1.0, manaCost: 10, desc: "Shield scales DEF+MND. Higher MND = stronger barrier." },
+      { id: "void_strike",  name: "Void Strike",  type: "atk", dmgType: "void",    power: 1.4, manaCost: 15, desc: "Chi blast. Scales MND, bypasses 80% of magic resistance." },
+    ],
+    passive: { name: "Serenity", desc: "Deal 50% of each Regen tick as damage to the enemy" },
+  },
 ];
 
 export function getClass(key) { return CLASSES.find(c => c.key === key); }
@@ -110,6 +121,13 @@ export const MULTICLASS_NAMES = {
   "ranger+ranger": { name: "Hawkeye",      icon: "🦅" },
   "thief+thief":   { name: "Assassin",     icon: "🗡️" },
   "druid+druid":   { name: "Shaman",       icon: "🌿" },
+  "monk+monk":     { name: "Grandmaster",  icon: "☯️" },
+  // Monk multiclass
+  "knight+monk":   { name: "Paladin",      icon: "✝️" },
+  "mage+monk":     { name: "Sage",         icon: "📿" },
+  "monk+ranger":   { name: "Wanderer",     icon: "🍂" },
+  "monk+thief":    { name: "Shadow Monk",  icon: "👁️" },
+  "druid+monk":    { name: "Ascetic",      icon: "🪷" },
 };
 
 export function getMulticlassInfo(key1, key2) {
