@@ -33,7 +33,7 @@ export const CLASSES = [
       { id: "magic_bolt",  name: "Magic Bolt",  type: "atk", dmgType: "magical", power: 1.0, manaCost: 0,  desc: "A bolt of raw arcane energy." },
       { id: "inferno",     name: "Inferno",     type: "atk", dmgType: "magical", power: 1.2, manaCost: 15, effect: "burn", desc: "Scorching blast. Applies burn (SPR)." },
       { id: "mana_shield", name: "Mana Shield", type: "def", dmgType: "magical", power: 1.0, manaCost: 10, desc: "Arcane barrier, scales with DEF+MND." },
-      { id: "drain",       name: "Drain",       type: "atk", dmgType: "magical", power: 0.85, manaCost: 15, effect: "drain", desc: "Drains life. Heals for damage done (SPR)." },
+      { id: "drain",       name: "Drain",       type: "atk", dmgType: "magical", power: 0.95, manaCost: 15, effect: "drain", desc: "Drains life. Heals for damage done (SPR)." },
     ],
     passive: { name: "Knowledge", desc: "+1 SPR every 5 wins" },
   },
