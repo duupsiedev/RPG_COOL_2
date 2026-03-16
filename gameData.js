@@ -46,7 +46,7 @@ export const CLASSES = [
       { id: "smoke_bomb",   name: "Smoke Bomb",   type: "def", dmgType: "physical", power: 1.0, manaCost: 10, desc: "Vanish in smoke, scales with DEF+MND." },
       { id: "execute",      name: "Execute",      type: "atk", dmgType: "physical", power: 1.4, manaCost: 15, effect: "burn", desc: "Lethal strike. Applies burn." },
     ],
-    passive: { name: "Pickpocket", desc: "Heal 5% enemy max HP on kill" },
+    passive: { name: "Swift", desc: "Heal 5 + 5% AGI at turn start" },
   },
   {
     key: "druid", name: "Druid", icon: "🌿", color: "#16a085", baseScaling: 2, hpScaling: 1.4,

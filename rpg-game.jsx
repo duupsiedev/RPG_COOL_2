@@ -767,14 +767,6 @@ export default function RPGGame() {
       const isSpec = p.isSpecialized;
 
       for (const pk of passiveKeys) {
-        if (pk === "thief") {
-          const mult = isSpec && pk === p.classKey ? 2 : 1;
-          const h = Math.floor(e.maxHp * 0.05 * mult);
-          p.hp = Math.min(p.maxHp, p.hp + h);
-          logs.push(`🗡️ Pickpocket: +${h} HP`);
-          const sd = serenityProc(p, h);
-          if (sd > 0) { e.hp = Math.max(0, e.hp - sd); logs.push(`☯️ Serenity: ${sd} dmg`); }
-        }
         if (pk === "druid") {
           const rolls = isSpec && pk === p.classKey ? 2 : 1;
           const stats = ["atk","def","spr","mnd","agi"];
@@ -860,13 +852,6 @@ export default function RPGGame() {
         const exp  = Math.floor(e2.reward.exp  * skillXpMult(p2));
         p2.gold += gold; p2.exp += exp; p2.wins += 1;
         eLogs.push(`💀 ${e2.name} defeated by status! +${exp} EXP +${gold} Gold`);
-        if (p2.classKey === "thief" || p2.multiclassKey === "thief") {
-          const mult = p2.isSpecialized ? 2 : 1;
-          const h = Math.floor(e2.maxHp * 0.05 * mult);
-          p2.hp = Math.min(p2.maxHp, p2.hp + h);
-          const sd = serenityProc(p2, h);
-          if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); eLogs.push(`☯️ Serenity: ${sd} dmg`); }
-        }
         addLog(...eLogs);
         setLastReward({ gold, exp });
         setTimeout(() => setLastReward(null), 1800);
@@ -894,6 +879,19 @@ export default function RPGGame() {
           p2.hp = Math.min(p2.maxHp, p2.hp + eTick.bleedHeal);
           eLogs.push(`🏹 Predator (×2): +${eTick.bleedHeal} HP`);
           const sd = serenityProc(p2, eTick.bleedHeal);
+          if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
+        }
+
+        // Thief passive (Swift) — heal scaling AGI each turn
+        const hasThief = p2.classKey === "thief" || p2.multiclassKey === "thief";
+        if (hasThief) {
+          const mult = p2.isSpecialized ? 2 : 1;
+          const h = Math.floor((5 + eff(p2, "agi") * 0.05) * mult);
+          p2.hp = Math.min(p2.maxHp, p2.hp + h);
+          p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + h };
+          eLogs.push(`🗡️ Swift: +${h} HP`);
+          spawnFloat(`+${h}`, "#2ecc71", "player");
+          const sd = serenityProc(p2, h);
           if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
         }
 
