@@ -68,13 +68,13 @@ function getManaRegen(p)  { return Math.floor(10 + p.maxMana * 0.05); }
 // Defense uses soft diminishing returns: effective reduction = def / (def + 50) * atk
 // This means high DEF still matters but never walls completely, and damage scales smoothly
 function calcPhysDmg(atk, def, power) {
-  const reduction = def / (def + 200);        // 0→0%, 50→50%, 150→75%, never 100%
+  const reduction = def / (def + 120);        // 0→0%, 50→50%, 150→75%, never 100%
   const raw = atk * power * (1 - reduction * 0.8);
   return Math.max(Math.floor(atk * 0.05), Math.floor(raw)); // floor = 5% atk so always tickles
 }
 
 function calcMagDmg(spr, mnd, power) {
-  const reduction = mnd / (mnd + 200);
+  const reduction = mnd / (mnd + 120);
   const raw = spr * power * (1 - reduction * 0.8);
   return Math.max(Math.floor(spr * 0.05), Math.floor(raw));
 }
