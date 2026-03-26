@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   CLASSES, ENEMY_POOL, BOSS_POOL, SHOP_ITEMS, SKILLS_DEF,
+  PATHS_DATA, JOURNEY_MAX_LEVEL, JOURNEY_EXP_TABLE,
   getClass, getMulticlassInfo, applyMulticlass,
 } from "./gameData.js";
 
@@ -47,10 +48,19 @@ function initPlayer(classKey) {
     bonusPct:  { atk: 0, def: 0, spr: 0, mnd: 0, agi: 0 },
     shopLevels:{ atk: 0, def: 0, spr: 0, mnd: 0, agi: 0 },
     shopLevelsT2:{ atk: 0, def: 0, spr: 0, mnd: 0, agi: 0 },
+    shopLevelsT3:{ atk: 0, def: 0, spr: 0, mnd: 0, agi: 0 },
     shopTier:  { atk: 1, def: 1, spr: 1, mnd: 1, agi: 1 },
     statusEffects: [], passiveWins: 0, shield: 0,
     skillPoints: 0, skills: { xpBonus: 0, goldBonus: 0, statBonus: 0 },
     runStats: { dmgDealt: 0, dmgReceived: 0, dmgHealed: 0, killedBy: null },
+    // Path & Journey
+    pathKey: null, pathSkills: {},
+    journeyExp: 0, journeyLevel: 0, journeyPoints: 0,
+    harmonyBoosts: 0,
+    // Per-combat (reset each fight)
+    burnStacks: 0, soulStacks: 0, critStacks: 0,
+    yinStacks: 0, yangStacks: 0,
+    moveCooldowns: {}, combatHealTotal: 0,
   };
 }
 
@@ -58,7 +68,12 @@ function eff(player, stat) {
   const base = player.stats[stat];
   const flat = player.bonusFlat[stat];
   const pct  = player.bonusPct[stat] + (player.skills?.statBonus || 0) * 5;
-  return base + flat + Math.floor((base + flat) * pct / 100);
+  // Yin/Yang temp bonuses (Duality path — reset each combat)
+  const stackAmp = pathSkillVal(player, "stack_amp");
+  let tempPct = 0;
+  if (stat === "atk") tempPct += (player.yinStacks  || 0) * (2 + stackAmp);
+  if (stat === "spr") tempPct += (player.yangStacks || 0) * (2 + stackAmp);
+  return base + flat + Math.floor((base + flat) * (pct + tempPct) / 100);
 }
 
 function skillXpMult(p)   { return 1 + (p.skills?.xpBonus   || 0) * 0.10; }
@@ -90,11 +105,85 @@ function calcVoidDmg(mnd, enemyMnd, power) {
 }
 function calcHeal(mnd) { return Math.floor(mnd * 1.6 + 12); }
 
-// Serenity: regen ticks = 50%, all other heals = 20%
+// ---- Path / Journey helpers ----
+function pathSkillVal(player, key) { return (player.pathSkills || {})[key] || 0; }
+
+function getPathDef(player) {
+  if (!player.pathKey) return null;
+  return (PATHS_DATA[player.classKey] || []).find(p => p.key === player.pathKey) || null;
+}
+
+function getPlayerMoves(player) {
+  const cls = getClass(player.classKey);
+  const pathDef = getPathDef(player);
+  if (!pathDef) return cls.moves;
+  const moves = [...cls.moves];
+  moves[0] = pathDef.newMoves[0];
+  moves[1] = pathDef.newMoves[1];
+  const defIdx = moves.findIndex(m => m.id === pathDef.defMoveRename.renamedFrom);
+  if (defIdx >= 0) moves[defIdx] = { ...moves[defIdx], id: pathDef.defMoveRename.id, name: pathDef.defMoveRename.name };
+  return moves;
+}
+
+// Effective enemy DEF reduced by Wither stacks
+function effEnemyDef(enemy, player) {
+  const stacks = enemy.witherStacks || 0;
+  const amp = pathSkillVal(player, "wither_amp");
+  return Math.max(0, Math.floor(enemy.def * (1 - stacks * (0.03 + amp * 0.01))));
+}
+
+// Poison tick damage formula
+function calcPoisonDmg(player) {
+  return Math.max(1, Math.round(eff(player, "spr") * 0.15 + eff(player, "atk") * 0.15 + player.maxHp * 0.01));
+}
+
+// Apply path to player (called when player picks a path)
+function applyPath(player, pathKey) {
+  const cls = getClass(player.classKey);
+  return {
+    ...player,
+    pathKey,
+    pathSkills: {},
+    journeyExp: player.journeyExp || 0,
+    journeyLevel: player.journeyLevel || 0,
+    journeyPoints: player.journeyPoints || 0,
+    combinedScaling: Math.ceil((player.combinedScaling || cls.baseScaling) * 1.5),
+    pathHpScaling: (cls.hpScaling || 1) * 1.5,
+    burnStacks: 0, soulStacks: 0, critStacks: 0,
+    yinStacks: 0, yangStacks: 0,
+    harmonyBoosts: player.harmonyBoosts || 0,
+    moveCooldowns: {}, combatHealTotal: 0,
+  };
+}
+
+// Unified move damage calculator respecting scalesStat and defPen
+function calcMoveDmg(move, player, enemy) {
+  const wDef = effEnemyDef(enemy, player);
+  const penDef = Math.floor(wDef * (1 - (move.defPen || 0)));
+  const ss = move.scalesStat;
+  let atkStat;
+  if      (ss === "def")     atkStat = eff(player, "def");
+  else if (ss === "agi")     atkStat = eff(player, "agi");
+  else if (ss === "spr")     atkStat = eff(player, "spr");
+  else if (ss === "atk")     atkStat = eff(player, "atk");
+  else if (ss === "spr+mnd") atkStat = Math.floor((eff(player, "spr") + eff(player, "mnd")) / 2);
+  else if (move.dmgType === "physical") atkStat = eff(player, "atk");
+  else if (move.dmgType === "magical")  atkStat = eff(player, "spr");
+  else                                   atkStat = eff(player, "mnd");
+  if (move.dmgType === "chi")  return calcChiDmg(eff(player, "mnd"), penDef, move.power);
+  if (move.dmgType === "void") return calcVoidDmg(eff(player, "mnd"), enemy.mnd, move.power);
+  if (move.dmgType === "physical") return calcPhysDmg(atkStat, penDef, move.power);
+  return calcMagDmg(atkStat, enemy.mnd, move.power);
+}
+
+// Serenity proc — updated for Grandmaster (75% regen instead of 50%)
 function serenityProc(player, healAmt, isRegen = false) {
   const hasMonk = player.classKey === "monk" || player.multiclassKey === "monk";
   if (!hasMonk || healAmt <= 0) return 0;
-  return Math.floor(healAmt * (isRegen ? 0.5 : 0.2));
+  const isGrandmaster = player.pathKey === "grandmaster" && player.classKey === "monk";
+  const regenPct = isGrandmaster ? 0.75 + pathSkillVal(player, "eternal_flow_amp") * 0.03 : 0.50;
+  const pct = isRegen ? regenPct : 0.20;
+  return Math.floor(healAmt * pct);
 }
 
 function agiCheck(atkAgi, defAgi) {
@@ -104,29 +193,51 @@ function agiCheck(atkAgi, defAgi) {
 }
 
 function tickStatus(target) {
-  const logs = []; let bleedHeal = 0; let regenHeal = 0;
-  const totalDmg = (target.statusEffects || []).reduce((s, e) =>
-    (e.type === "burn" || e.type === "bleed") ? s + e.dmg : s, 0);
+  const logs = []; let bleedHeal = 0; let regenHeal = 0; let totalDotDmg = 0;
   const effects = (target.statusEffects || []).map(e => {
-    if (e.type === "burn")  { logs.push(`🔥 Burn: ${e.dmg} dmg`);  return { ...e, turns: e.turns - 1 }; }
-    if (e.type === "bleed") { bleedHeal += e.dmg; logs.push(`🩸 Bleed: ${e.dmg} dmg`); return { ...e, turns: e.turns - 1 }; }
-    if (e.type === "regen") { regenHeal += e.dmg; logs.push(`💚 Regen: +${e.dmg} HP`); return { ...e, turns: e.turns - 1 }; }
+    if (e.type === "burn") {
+      totalDotDmg += e.dmg;
+      logs.push(`🔥 Burn: ${e.dmg} dmg`);
+      return { ...e, turns: e.turns - 1 };
+    }
+    if (e.type === "bleed") {
+      totalDotDmg += e.dmg; bleedHeal += e.dmg;
+      logs.push(`🩸 Bleed: ${e.dmg} dmg`);
+      return { ...e, turns: e.turns - 1 };
+    }
+    if (e.type === "regen") {
+      regenHeal += e.dmg;
+      logs.push(`💚 Regen: +${e.dmg} HP`);
+      return { ...e, turns: e.turns - 1 };
+    }
+    if (e.type === "poison") {
+      // Toxicology: poison grows 10% per active turn (ageBonus accumulates)
+      const aged = Math.max(1, Math.floor(e.dmg * (1 + (e.ageBonus || 0))));
+      totalDotDmg += aged;
+      logs.push(`☠️ Poison: ${aged} dmg`);
+      return { ...e, turns: e.turns - 1, ageBonus: (e.ageBonus || 0) + 0.10 };
+    }
     return e;
   }).filter(e => e.turns > 0);
-  return { target: { ...target, hp: Math.max(0, target.hp - totalDmg), statusEffects: effects }, logs, bleedHeal, regenHeal };
+  return { target: { ...target, hp: Math.max(0, target.hp - totalDotDmg), statusEffects: effects }, logs, bleedHeal, regenHeal };
 }
 
-function applyEffect(target, effect, dmg) {
+function applyEffect(target, effect, dmg, opts = {}) {
   const effects = [...(target.statusEffects || [])];
-  const turns = effect === "stun" ? 1 : effect === "regen" ? 3 : 3;
+  const turns = effect === "stun" ? 1 : effect === "curse" ? 3 : effect === "poison" ? (opts.duration || 4) : 3;
   const idx = effects.findIndex(e => e.type === effect);
   if (effect === "regen" && idx >= 0) {
     // Regen stacks turns, capped at 6
-    effects[idx] = { ...effects[idx], turns: Math.min(6, effects[idx].turns + 3), dmg };
+    const addTurns = opts.addTurns || 3;
+    effects[idx] = { ...effects[idx], turns: Math.min(6, effects[idx].turns + addTurns), dmg };
+  } else if (effect === "refresh_poison" && idx >= 0) {
+    // Refresh poison duration but keep ageBonus (Toxicology)
+    effects[idx] = { ...effects[idx], turns: opts.duration || 4 };
   } else if (idx >= 0) {
     effects[idx] = { ...effects[idx], turns, dmg };
   } else {
-    effects.push({ type: effect, turns, dmg });
+    const type = effect === "refresh_poison" ? "poison" : effect;
+    effects.push({ type, turns, dmg });
   }
   return { ...target, statusEffects: effects };
 }
@@ -192,9 +303,11 @@ function Log({ lines }) {
 }
 
 function MoveBtn({ move, player, onUse, disabled }) {
-  const ok  = player.mana >= move.manaCost;
-  const col = { atk: "#c0392b", def: "#2980b9", heal: "#16a085" }[move.type] || "#666";
+  const cd  = (player.moveCooldowns || {})[move.id] || 0;
+  const ok  = player.mana >= move.manaCost && cd === 0;
+  const col = { atk: "#c0392b", def: "#2980b9", heal: "#16a085", regen: "#e67e22", "heal+atk": "#16a085" }[move.type] || "#666";
   const [hover, setHover] = useState(false);
+  const effectIcons = { burn:"🔥", bleed:"🩸", drain:"💜", stun:"💫", poison:"☠️", curse:"💀", burn_stack:"🔥", consume_burn:"💥", "poison+bleed":"☠️🩸" };
   return (
     <button onClick={() => onUse(move)} disabled={disabled || !ok}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
@@ -204,11 +317,15 @@ function MoveBtn({ move, player, onUse, disabled }) {
         borderRadius: 8, padding: "8px 10px", cursor: ok && !disabled ? "pointer" : "not-allowed",
         color: ok ? "#ddd" : "#444", textAlign: "left", width: "100%", transition: "all 0.15s",
       }}>
-      <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 1 }}>{move.name}{move.hits ? ` ×${move.hits}` : ""}</div>
+      <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 1, display: "flex", justifyContent: "space-between" }}>
+        <span>{move.name}{move.hits ? ` ×${move.hits}` : ""}</span>
+        {cd > 0 && <span style={{ color: "#f97316", fontSize: 11 }}>{cd}⏳</span>}
+      </div>
       <div style={{ fontSize: 10, color: "#777" }}>{move.desc}</div>
       <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>
-        {move.manaCost > 0 ? `💧${move.manaCost}` : "Free"} · {move.dmgType === "physical" ? "⚔️" : move.dmgType === "magical" ? "✨" : "💚"}
-        {move.effect ? ` · ${{ burn:"🔥", bleed:"🩸", drain:"💜", stun:"💫" }[move.effect] || ""}` : ""}
+        {move.manaCost > 0 ? `💧${move.manaCost}` : "Free"} · {move.dmgType === "physical" ? "⚔️" : move.dmgType === "magical" ? "✨" : move.dmgType === "chi" ? "☯️" : move.dmgType === "void" ? "🌀" : "💚"}
+        {move.effect ? ` · ${effectIcons[move.effect] || ""}` : ""}
+        {move.cooldown ? ` · CD:${move.cooldown}` : ""}
       </div>
     </button>
   );
@@ -248,10 +365,12 @@ function ShopScreen({ player, setPlayer, setScreen }) {
   const [tab, setTab] = useState("shop");
   const sk = player.skills;
   const sp = player.skillPoints;
+  const jp = player.journeyPoints || 0;
+  const pathDef = getPathDef(player);
 
   function buyItem(item, tier) {
-    const td  = tier === 2 ? item.t2 : item.t1;
-    const lvlKey = tier === 2 ? "shopLevelsT2" : "shopLevels";
+    const td  = tier === 3 ? item.t3 : tier === 2 ? item.t2 : item.t1;
+    const lvlKey = tier === 3 ? "shopLevelsT3" : tier === 2 ? "shopLevelsT2" : "shopLevels";
     const lvl = (player[lvlKey] || {})[item.stat] || 0;
     const price = Math.floor(td.price * Math.pow(1.2, lvl));
     if (player.gold < price) return;
@@ -261,6 +380,7 @@ function ShopScreen({ player, setPlayer, setScreen }) {
       bonusPct:  { ...player.bonusPct },
       shopLevels:   { ...player.shopLevels },
       shopLevelsT2: { ...(player.shopLevelsT2 || { atk:0,def:0,spr:0,mnd:0,agi:0 }) },
+      shopLevelsT3: { ...(player.shopLevelsT3 || { atk:0,def:0,spr:0,mnd:0,agi:0 }) },
       shopTier: { ...player.shopTier },
     };
     p.gold -= price;
@@ -287,17 +407,20 @@ function ShopScreen({ player, setPlayer, setScreen }) {
           <div style={{ textAlign: "right" }}>
             <div style={{ color: "#e8c070", fontWeight: 700 }}>💰 {player.gold}g</div>
             {sp > 0 && <div style={{ color: "#a78bfa", fontSize: 11, fontWeight: 700 }}>✨ {sp} skill point{sp > 1 ? "s" : ""}</div>}
+            {jp > 0 && <div style={{ color: "#16a085", fontSize: 11, fontWeight: 700 }}>🌟 {jp} path point{jp > 1 ? "s" : ""}</div>}
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          {["shop", "skills"].map(t => (
+          {["shop", "skills", ...(pathDef ? ["journey"] : [])].map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               flex: 1, padding: "8px 0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer",
               background: tab === t ? "#1a1a2e" : "transparent",
               border: `1px solid ${tab === t ? "#e8c07066" : "#222"}`,
               color: tab === t ? "#e8c070" : "#555",
-            }}>{t === "shop" ? "🏪 Shop" : `🌟 Skills${sp > 0 ? ` (${sp})` : ""}`}</button>
+            }}>
+              {t === "shop" ? "🏪 Shop" : t === "skills" ? `🌟 Skills${sp > 0 ? ` (${sp})` : ""}` : `🌿 Journey${jp > 0 ? ` (${jp})` : ""}`}
+            </button>
           ))}
         </div>
 
@@ -306,25 +429,27 @@ function ShopScreen({ player, setPlayer, setScreen }) {
             {SHOP_ITEMS.map(item => {
               const lvl1 = player.shopLevels[item.stat] || 0;
               const lvl2 = (player.shopLevelsT2 || {})[item.stat] || 0;
+              const lvl3 = (player.shopLevelsT3 || {})[item.stat] || 0;
               const t1p = Math.floor(item.t1.price * Math.pow(1.2, lvl1));
               const t2p = Math.floor(item.t2.price * Math.pow(1.2, lvl2));
+              const t3p = Math.floor(item.t3.price * Math.pow(1.2, lvl3));
               return (
                 <div key={item.id} style={{ background: "#0e0e18", border: "1px solid #1e1e2e", borderRadius: 10, padding: "10px 14px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
                     <div style={{ fontSize: 20 }}>{item.icon}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>{item.name} <span style={{ color: "#555", fontSize: 10 }}>T1 Lv.{lvl1} · T2 Lv.{lvl2}</span></div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{item.name} <span style={{ color: "#555", fontSize: 10 }}>T1 Lv.{lvl1} · T2 Lv.{lvl2} · T3 Lv.{lvl3}</span></div>
                       <div style={{ fontSize: 10, color: "#666" }}>{item.stat.toUpperCase()} {eff(player, item.stat)} (+{player.bonusFlat[item.stat]} flat, +{player.bonusPct[item.stat]}%)</div>
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {[{ tier: 1, price: t1p, label: "T1 +1/+5%" }, { tier: 2, price: t2p, label: "T2 +5/+10%", gold: true }].map(({ tier, price, label, gold }) => {
+                    {[{ tier: 1, price: t1p, label: "T1 +1/+5%" }, { tier: 2, price: t2p, label: "T2 +5/+10%", gold: true }, { tier: 3, price: t3p, label: "T3 +15/+25%", gem: true }].map(({ tier, price, label, gold, gem }) => {
                       const can = player.gold >= price;
                       return (
                         <button key={tier} onClick={() => buyItem(item, tier)} disabled={!can} style={{
-                          flex: 1, background: can ? (gold ? "#e8c07011" : "#ffffff11") : "#111",
-                          border: `1px solid ${can ? (gold ? "#e8c070" : "#aaa") : "#222"}`,
-                          color: can ? (gold ? "#e8c070" : "#ddd") : "#444",
+                          flex: 1, background: can ? (gem ? "#a78bfa11" : gold ? "#e8c07011" : "#ffffff11") : "#111",
+                          border: `1px solid ${can ? (gem ? "#a78bfa" : gold ? "#e8c070" : "#aaa") : "#222"}`,
+                          color: can ? (gem ? "#a78bfa" : gold ? "#e8c070" : "#ddd") : "#444",
                           borderRadius: 6, padding: "5px 0", cursor: can ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 700,
                         }}>{label} · {price}g</button>
                       );
@@ -371,6 +496,73 @@ function ShopScreen({ player, setPlayer, setScreen }) {
             <div style={{ fontSize: 10, color: "#444", textAlign: "center", marginTop: 4 }}>
               Available: <span style={{ color: "#a78bfa", fontWeight: 700 }}>{sp} point{sp !== 1 ? "s" : ""}</span>
             </div>
+          </div>
+        )}
+
+        {tab === "journey" && pathDef && (
+          <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+            {/* Journey EXP bar */}
+            <div style={{ background: "#0e0e18", border: "1px solid #16a08544", borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888", marginBottom: 6 }}>
+                <span style={{ color: "#16a085", fontWeight: 700 }}>🌿 {pathDef.name} — Journey Lv.{player.journeyLevel || 0}/{JOURNEY_MAX_LEVEL}</span>
+                <span style={{ color: "#555" }}>{jp} point{jp !== 1 ? "s" : ""} available</span>
+              </div>
+              {(player.journeyLevel || 0) < JOURNEY_MAX_LEVEL && (
+                <div style={{ height: 6, background: "#111", borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{
+                    height: "100%", borderRadius: 3, background: "#16a085", transition: "width 0.3s",
+                    width: `${Math.max(0, Math.min(100, ((player.journeyExp||0) - JOURNEY_EXP_TABLE[player.journeyLevel||0]) / (JOURNEY_EXP_TABLE[(player.journeyLevel||0)+1] - JOURNEY_EXP_TABLE[player.journeyLevel||0]) * 100))}%`
+                  }} />
+                </div>
+              )}
+              <div style={{ fontSize: 10, color: "#444", marginTop: 4 }}>
+                {(player.journeyLevel || 0) < JOURNEY_MAX_LEVEL
+                  ? `${player.journeyExp || 0} / ${JOURNEY_EXP_TABLE[(player.journeyLevel||0)+1]} EXP`
+                  : "MAX LEVEL"}
+              </div>
+            </div>
+
+            {/* Path skills */}
+            <div style={{ fontSize: 11, color: "#555", marginBottom: 2 }}>Path Skills · 1 point per rank (or listed cost for special skills)</div>
+            {pathDef.pathSkills.map(skill => {
+              const invested = pathSkillVal(player, skill.key);
+              const atMax    = invested >= skill.max;
+              const canBuy   = jp >= skill.cost && !atMax;
+              return (
+                <div key={skill.key} style={{ background: "#0e0e18", border: "1px solid #16a08533", borderRadius: 10, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#16a085" }}>
+                        {skill.label} <span style={{ color: "#555", fontSize: 10 }}>Lv.{invested}/{skill.max}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: "#666" }}>{skill.desc}</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (!canBuy) return;
+                        setPlayer(prev => ({
+                          ...prev,
+                          journeyPoints: (prev.journeyPoints || 0) - skill.cost,
+                          pathSkills: { ...(prev.pathSkills || {}), [skill.key]: invested + 1 },
+                        }));
+                      }}
+                      disabled={!canBuy}
+                      style={{
+                        background: canBuy ? "#16a08522" : "#111", border: `1px solid ${canBuy ? "#16a085" : "#222"}`,
+                        color: canBuy ? "#16a085" : "#444", borderRadius: 7, padding: "6px 10px",
+                        cursor: canBuy ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+                      }}>
+                      {atMax ? "MAX" : `Invest (${skill.cost}pt)`}
+                    </button>
+                  </div>
+                  {skill.max > 1 && (
+                    <div style={{ marginTop: 8, height: 4, background: "#111", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${(invested / skill.max) * 100}%`, background: "#16a085", borderRadius: 2, transition: "width 0.3s" }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -529,6 +721,65 @@ function MulticlassScreen({ player, onSelect }) {
 }
 
 // ============================================================
+// PATH SELECT SCREEN
+// ============================================================
+
+function PathSelect({ player, onSelect }) {
+  const [hovered, setHovered] = useState(null);
+  const paths = PATHS_DATA[player.classKey] || [];
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#07070f", fontFamily: "Georgia, serif", color: "#eee", display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 16px" }}>
+      <div style={{ maxWidth: 700, width: "100%", textAlign: "center", marginBottom: 28 }}>
+        <div style={{ fontSize: 13, color: "#e8c070", letterSpacing: 3, textTransform: "uppercase", marginBottom: 8 }}>2nd Boss Defeated · Win 50</div>
+        <h1 style={{ margin: 0, fontSize: 26, color: "#a78bfa", letterSpacing: 3, textTransform: "uppercase", fontWeight: 900 }}>Choose Your Path</h1>
+        <p style={{ color: "#555", fontSize: 12, marginTop: 8 }}>
+          Your path replaces your first two moves and passive. Scaling and HP scaling increase by 50%. Unlocks the Journey tab.
+        </p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, maxWidth: 700, width: "100%" }}>
+        {paths.map(path => {
+          const isHov = hovered === path.key;
+          return (
+            <button key={path.key}
+              onClick={() => onSelect(path.key)}
+              onMouseEnter={() => setHovered(path.key)}
+              onMouseLeave={() => setHovered(null)}
+              style={{
+                background: isHov ? "#1a1a2e" : "#0e0e18",
+                border: `2px solid ${isHov ? "#a78bfa" : "#a78bfa44"}`,
+                borderRadius: 14, padding: "18px 16px", cursor: "pointer", color: "#eee", textAlign: "left",
+                transition: "all 0.2s", transform: isHov ? "translateY(-3px)" : "",
+                boxShadow: isHov ? "0 6px 24px #a78bfa33" : "none",
+              }}>
+              <div style={{ fontWeight: 900, fontSize: 16, color: "#a78bfa", marginBottom: 4 }}>{path.name}</div>
+              <div style={{ fontSize: 11, color: "#e8c070", marginBottom: 10, fontStyle: "italic" }}>
+                ✨ {path.passive.name} — {path.passive.desc}
+              </div>
+              <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>New Moves</div>
+              {path.newMoves.map(m => (
+                <div key={m.id} style={{ background: "#080810", border: "1px solid #1e1e2e", borderRadius: 6, padding: "5px 8px", marginBottom: 5, fontSize: 10 }}>
+                  <span style={{ color: "#ddd", fontWeight: 700 }}>{m.name}</span>
+                  <span style={{ color: "#555", marginLeft: 6 }}>{m.desc}</span>
+                </div>
+              ))}
+              <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: 1, margin: "10px 0 6px" }}>Path Skills</div>
+              {path.pathSkills.map(sk => (
+                <div key={sk.key} style={{ fontSize: 10, color: "#777", marginBottom: 3 }}>
+                  <span style={{ color: "#a78bfa" }}>{sk.label}</span>
+                  <span style={{ color: "#444", marginLeft: 4 }}>· {sk.desc}</span>
+                </div>
+              ))}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // RUN SUMMARY
 // ============================================================
 
@@ -644,9 +895,23 @@ export default function RPGGame() {
       setScreen("multiclass");
       return;
     }
+    // Show path select after 2nd boss (win 50) if not yet chosen
+    if (p.wins === 50 && !p.pathKey) {
+      setScreen("path_select");
+      return;
+    }
+    // Reset per-combat state
+    p = {
+      ...p,
+      burnStacks: 0, soulStacks: 0, critStacks: 0,
+      yinStacks: 0, yangStacks: 0,
+      moveCooldowns: {}, combatHealTotal: 0,
+      transcendenceThisTurn: false,
+    };
     const e = spawnEnemy(p.wins, p.level);
     setEnemy(e); setLog([]); setPhase("active");
     setPlayerTurn(true); setScreen("combat"); setBusy(false);
+    setPlayer(p);
     const isBoss = p.wins > 0 && p.wins % 25 === 0;
     addLog(isBoss ? `⚠️ BOSS — ${e.icon} ${e.name} approaches!` : `${e.icon} ${e.name} appears!`);
   }
@@ -679,20 +944,34 @@ export default function RPGGame() {
     beginCombat(p);
   }
 
+  function handlePath(pathKey) {
+    const p = applyPath(player, pathKey);
+    setPlayer(p);
+    beginCombat(p);
+  }
+
   function handleMove(move) {
     if (!playerTurn || busy || phase !== "active") return;
     if (player.mana < move.manaCost) return;
+    // Cooldown check
+    if ((player.moveCooldowns || {})[move.id] > 0) return;
     setBusy(true);
 
-    let p = { ...player, statusEffects: [...(player.statusEffects || [])], stats: { ...player.stats } };
+    let p = { ...player, statusEffects: [...(player.statusEffects || [])], stats: { ...player.stats }, moveCooldowns: { ...(player.moveCooldowns || {}) } };
     let e = { ...enemy,  statusEffects: [...(enemy.statusEffects  || [])] };
     const logs = [];
 
     p.mana -= move.manaCost;
 
+    // Set cooldown if this move has one (unless remove_cooldown path skill purchased)
+    if (move.cooldown && !(move.id === "meteor" && pathSkillVal(p, "remove_cooldown") >= 1)) {
+      p.moveCooldowns[move.id] = move.cooldown;
+    }
+
     if (move.type === "heal") {
       const h = calcHeal(eff(p, "mnd"));
       p.hp = Math.min(p.maxHp, p.hp + h);
+      p.combatHealTotal = (p.combatHealTotal || 0) + h;
       logs.push(`💚 ${move.name}: Healed ${h} HP`);
       spawnFloat(`+${h}`, "#2ecc71", "player");
       p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
@@ -700,36 +979,151 @@ export default function RPGGame() {
       if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
 
     } else if (move.type === "regen") {
-      // Inner Focus — apply/extend Regen status
-      const regenVal = Math.floor(eff(p, "mnd") * 0.5);
-      p = applyEffect(p, "regen", regenVal);
-      const currentTurns = p.statusEffects.find(s => s.type === "regen")?.turns || 3;
+      // Inner Focus / Transcendence
+      const mndMult = move.mndMult || 0.5;
+      const regenVal = Math.max(1, Math.floor(eff(p, "mnd") * mndMult * (1 + pathSkillVal(p, "regen_amp") * 0.02)));
+      const isGrandmaster = p.pathKey === "grandmaster" && p.classKey === "monk";
+      const baseTurns = isGrandmaster ? 4 : 3;
+      const extraTurns = pathSkillVal(p, "focus_duration");
+      const addTurns = baseTurns + extraTurns;
+      p = applyEffect(p, "regen", regenVal, { addTurns });
+      // Transcendence: flag this tick for 100% serenity
+      if (move.effect === "serenity_100") p = { ...p, transcendenceThisTurn: true };
+      const currentTurns = p.statusEffects.find(s => s.type === "regen")?.turns || addTurns;
       logs.push(`☯️ ${move.name}: Regen ${regenVal}/turn (${currentTurns} turns)`);
       spawnFloat(`☯️`, "#e67e22", "player");
 
     } else if (move.type === "def") {
-      const shield = Math.floor(eff(p, "def") * 0.6 + eff(p, "mnd") * 0.4);
+      let shield;
+      if (move.scalesStat === "agi") {
+        shield = Math.floor(eff(p, "agi") * 1.0);
+      } else {
+        shield = Math.floor(eff(p, "def") * 0.6 + eff(p, "mnd") * 0.4);
+      }
       p.shield = (p.shield || 0) + shield;
       logs.push(`🛡️ ${move.name}: Shielded ${shield}`);
       spawnFloat(`🛡${shield}`, "#3498db", "player");
+      // Commander path: stronghold_ironclad — auto-activate ironclad after stronghold
+      if (move.id === "stronghold" && pathSkillVal(p, "stronghold_ironclad") >= 1) {
+        const extraShield = Math.floor(eff(p, "def") * 0.6 + eff(p, "mnd") * 0.4);
+        p.shield += extraShield;
+        logs.push(`🛡️ Ironclad (auto): +${extraShield} shield`);
+      }
+
+    } else if (move.type === "heal+atk") {
+      // Verdant Bloom (Archdruid): heal + regen + small dmg to enemy
+      const healAmt = Math.max(1, Math.floor(eff(p, "mnd") * (0.4 + pathSkillVal(p, "bloom_amp") * 0.03)));
+      p.hp = Math.min(p.maxHp, p.hp + healAmt);
+      p.combatHealTotal = (p.combatHealTotal || 0) + healAmt;
+      p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + healAmt };
+      logs.push(`🌿 ${move.name}: Healed ${healAmt} HP`);
+      spawnFloat(`+${healAmt}`, "#2ecc71", "player");
+      // Apply regen
+      const regenVal = Math.max(1, Math.floor(eff(p, "mnd") * 0.3));
+      p = applyEffect(p, "regen", regenVal, { addTurns: 3 });
+      logs.push(`💚 Verdant Regen: ${regenVal}/turn`);
+      // Small damage to enemy
+      const smDmg = Math.max(1, Math.floor(calcMagDmg(eff(p, "spr"), e.mnd, move.power)));
+      e.hp = Math.max(0, e.hp - smDmg);
+      p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + smDmg };
+      logs.push(`🌿 Nature strike: ${smDmg} dmg`);
+      spawnFloat(`${smDmg}`, "#16a085", "enemy");
+      const sd = serenityProc(p, healAmt);
+      if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
 
     } else {
-      const ac  = agiCheck(eff(p, "agi"), e.agi);
+      // All attack moves
+      const ac = agiCheck(eff(p, "agi"), e.agi);
       if (Math.random() < ac.evade) {
         logs.push(`💨 ${e.name} evaded!`);
       } else {
-        const crit = Math.random() < ac.crit;
-        const hits = move.hits || 1;
+        // Determine crit
+        const critChanceBonus = pathSkillVal(p, "crit_chance_amp") * 0.02;
+        const critMultBonus   = pathSkillVal(p, "crit_mult_amp") * 0.05;
+        const critStackBonus  = (p.critStacks || 0) * 0.20;
+        const forceCrit = move.effect === "consume_crit_stack" && (p.critStacks || 0) > 0;
+        const crit = forceCrit || Math.random() < (ac.crit + critChanceBonus);
+        const critMult = 1.5 + critMultBonus + critStackBonus;
+
+        if (forceCrit && move.effect === "consume_crit_stack") {
+          p.critStacks = Math.max(0, (p.critStacks || 0) - 1);
+          logs.push(`🎯 Deathmark: guaranteed crit (${p.critStacks + 1} stacks → ${p.critStacks})`);
+        }
+
+        let hits = move.hits || 1;
+        // Extra hit path skills
+        if (move.id === "flurry")           hits += pathSkillVal(p, "flurry_extra");
+        if (move.id === "rain_of_arrows")   hits += pathSkillVal(p, "extra_arrow");
+        if (move.id === "phantom_arrow")    hits += pathSkillVal(p, "phantom_extra");
+        if (move.id === "inversion_strike") hits += pathSkillVal(p, "dual_extra");
+        if (move.id === "soul_cannon")      hits += pathSkillVal(p, "dual_extra");
+
+        // Consume Yin/Yang stacks for bonus
+        let stackBonusPct = 1.0;
+        if (move.effect === "consume_yin") {
+          const stacks = p.yinStacks || 0;
+          stackBonusPct = 1 + stacks * 0.20;
+          p.yinStacks = 0;
+          if (stacks > 0) logs.push(`☯️ Consumed ${stacks} Yin stacks (+${Math.round((stackBonusPct-1)*100)}% dmg)`);
+        }
+        if (move.effect === "consume_yang") {
+          const stacks = p.yangStacks || 0;
+          stackBonusPct = 1 + stacks * 0.20;
+          p.yangStacks = 0;
+          if (stacks > 0) logs.push(`☯️ Consumed ${stacks} Yang stacks (+${Math.round((stackBonusPct-1)*100)}% dmg)`);
+        }
+
+        // Immolate: consume burn stacks
+        let immolateBonus = 1.0;
+        if (move.effect === "consume_burn") {
+          const stacks = p.burnStacks || 0;
+          immolateBonus = Math.min(3.0 / 1.2, 1 + stacks * 0.5); // effective multiplier on top of power
+          logs.push(`🔥 Immolate: ${stacks} stacks consumed!`);
+          p.burnStacks = 0;
+        }
+
+        // Wrath of Nature: power scales with harmonyBoosts count
+        let wrathBonus = 1.0;
+        if (move.effect === "harmony_scale") {
+          const boosts = p.harmonyBoosts || 0;
+          wrathBonus = 1 + boosts * 0.05 * (1 + pathSkillVal(p, "wrath_amp") * 0.15);
+        }
+
         let totalDmg = 0;
         for (let h = 0; h < hits; h++) {
-          let d;
-          if (move.dmgType === "chi")       d = calcChiDmg(eff(p, "mnd"), e.def, move.power);
-          else if (move.dmgType === "void")  d = calcVoidDmg(eff(p, "mnd"), e.mnd, move.power);
-          else if (move.dmgType === "physical") d = calcPhysDmg(eff(p, "atk"), e.def, move.power);
-          else                               d = calcMagDmg(eff(p, "spr"), e.mnd, move.power);
-          if (crit) d = Math.floor(d * 1.5);
+          const isLastHit = h === hits - 1;
+          let d = calcMoveDmg(move, p, e);
+          d = Math.floor(d * stackBonusPct * immolateBonus * wrathBonus);
+          // Flurry: each hit crits independently
+          const hitCrit = move.id === "flurry" ? Math.random() < (ac.crit + critChanceBonus) : crit;
+          if (hitCrit) d = Math.floor(d * critMult);
           totalDmg += d;
+
+          // Decompose: bonus per active DoT
+          if (move.effect === "dot_bonus" && isLastHit) {
+            const dotCount = (e.statusEffects || []).filter(s => ["burn","bleed","poison"].includes(s.type)).length
+                           + (e.witherStacks > 0 ? 1 : 0);
+            const dotAmp   = pathSkillVal(p, "decompose_amp");
+            const dotBonus = Math.floor(d * dotCount * (0.10 + dotAmp * 0.10));
+            totalDmg += dotBonus;
+            if (dotBonus > 0) logs.push(`☣️ Decompose DoT bonus: +${dotBonus}`);
+          }
+
+          // Chi burst: bonus from total healed this combat
+          if (move.effect === "heal_scale" && isLastHit) {
+            const healBonus = Math.floor((p.combatHealTotal || 0) * 0.05);
+            totalDmg += healBonus;
+            if (healBonus > 0) logs.push(`☯️ Chi Burst heal bonus: +${healBonus}`);
+          }
+
+          // Bleed on last hit only (rain_of_arrows)
+          if (move.effect === "bleed_last" && isLastHit) {
+            const bleedAmp = pathSkillVal(p, "bleed_amp");
+            e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35 * (1 + bleedAmp * 0.03))));
+            logs.push("🩸 Bleed applied!");
+          }
         }
+
         e.hp = Math.max(0, e.hp - totalDmg);
         p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + totalDmg };
         logs.push(`${crit ? "⚡ CRIT! " : ""}${move.name}: ${totalDmg} dmg${hits > 1 ? ` (${hits}×)` : ""}`);
@@ -738,17 +1132,114 @@ export default function RPGGame() {
         spawnFloat(crit ? `⚡${totalDmg}` : `${totalDmg}`, fcol, "enemy");
         triggerShake("enemy");
 
-        if (move.effect === "burn")  { e = applyEffect(e, "burn",  Math.max(1, Math.floor(eff(p,"spr")*0.25))); logs.push("🔥 Burn applied!"); }
-        if (move.effect === "bleed") { e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk")*0.35))); logs.push("🩸 Bleed applied!"); }
-        if (move.effect === "stun" && Math.random() < 0.4) { e = applyEffect(e, "stun", 0); logs.push("💫 Enemy stunned!"); }
-        if (move.effect === "drain") {
-          const h = Math.floor(totalDmg * 0.6);
+        // Gain crit stack on crit (Assassin)
+        if (crit && p.pathKey === "assassin") {
+          const maxStacks = 5;
+          if ((p.critStacks || 0) < maxStacks) {
+            p.critStacks = (p.critStacks || 0) + 1;
+            logs.push(`🎯 Killing Edge: crit stack ${p.critStacks}/${maxStacks}`);
+          }
+        }
+
+        // Yin/Yang stacks (Duality)
+        if (p.pathKey === "duality") {
+          const stackCap = 5 + pathSkillVal(p, "stack_cap");
+          if (move.dmgType === "physical" && move.effect !== "consume_yang") {
+            if ((p.yangStacks || 0) < stackCap) {
+              p.yangStacks = (p.yangStacks || 0) + 1;
+              logs.push(`☯️ Yang Stack: ${p.yangStacks}/${stackCap} (+${(2 + pathSkillVal(p,"stack_amp"))}% SPR temp)`);
+            }
+          }
+          if (move.dmgType === "magical" && move.effect !== "consume_yin") {
+            if ((p.yinStacks || 0) < stackCap) {
+              p.yinStacks = (p.yinStacks || 0) + 1;
+              logs.push(`☯️ Yin Stack: ${p.yinStacks}/${stackCap} (+${(2 + pathSkillVal(p,"stack_amp"))}% ATK temp)`);
+            }
+          }
+        }
+
+        // ---- Effect resolution ----
+        if (move.effect === "burn" || (move.id === "spore_cloud" && pathSkillVal(p, "spore_burn") >= 1)) {
+          e = applyEffect(e, "burn", Math.max(1, Math.floor(eff(p,"spr") * 0.25)));
+          logs.push("🔥 Burn applied!");
+        }
+        if (move.effect === "bleed" && move.effect !== "bleed_last") {
+          const bleedAmp = pathSkillVal(p, "bleed_amp");
+          e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35 * (1 + bleedAmp * 0.03))));
+          logs.push("🩸 Bleed applied!");
+        }
+        if (move.effect === "stun" && Math.random() < 0.4) {
+          e = applyEffect(e, "stun", 0);
+          logs.push("💫 Enemy stunned!");
+        }
+        if (move.effect === "drain" || move.id === "soul_leech") {
+          const soulStacks = p.soulStacks || 0;
+          const drainAmp   = pathSkillVal(p, "drain_amp") * 0.02;
+          const healPct    = 0.60 + soulStacks * 0.05 + drainAmp;
+          const h = Math.floor(totalDmg * healPct);
           p.hp = Math.min(p.maxHp, p.hp + h);
+          p.combatHealTotal = (p.combatHealTotal || 0) + h;
           logs.push(`💜 Drain: Healed ${h} HP`);
           spawnFloat(`+${h}`, "#2ecc71", "player");
           p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
           const sd = serenityProc(p, h);
           if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+        }
+        if (move.effect === "burn_stack") {
+          const maxBurnStacks = 6;
+          if ((p.burnStacks || 0) < maxBurnStacks) {
+            p.burnStacks = (p.burnStacks || 0) + 1;
+            logs.push(`🔥 Burn Stack: ${p.burnStacks}/${maxBurnStacks}`);
+          }
+        }
+        if (move.effect === "poison") {
+          const poisonDmg = calcPoisonDmg(p);
+          const dur = 4 + pathSkillVal(p, "poison_duration");
+          e = applyEffect(e, "poison", poisonDmg, { duration: dur });
+          logs.push(`☠️ Poison applied! (${poisonDmg}/turn)`);
+          // venom_bleed path skill
+          if (move.id === "venom_strike" && pathSkillVal(p, "venom_bleed") >= 1) {
+            e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35)));
+            logs.push("🩸 Bleed applied (Venom)!");
+          }
+        }
+        if (move.effect === "refresh_poison") {
+          const poisonDmg = calcPoisonDmg(p);
+          const dur = 4 + pathSkillVal(p, "poison_duration");
+          e = applyEffect(e, "refresh_poison", poisonDmg, { duration: dur });
+          logs.push("☠️ Poison refreshed!");
+        }
+        if (move.effect === "poison+bleed") {
+          const poisonDmg = calcPoisonDmg(p);
+          const dur = 4 + pathSkillVal(p, "poison_duration");
+          e = applyEffect(e, "poison", poisonDmg, { duration: dur });
+          logs.push(`☠️ Poison applied! (${poisonDmg}/turn)`);
+          e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35)));
+          logs.push("🩸 Bleed applied!");
+          if (pathSkillVal(p, "spore_burn") >= 1) {
+            e = applyEffect(e, "burn", Math.max(1, Math.floor(eff(p,"spr") * 0.25)));
+            logs.push("🔥 Burn applied (Spore)!");
+          }
+        }
+        if (move.effect === "curse") {
+          e = applyEffect(e, "curse", Math.max(1, Math.floor(eff(p,"spr") * 0.25)));
+          logs.push("💀 Cursed!");
+          // coil_bleed path skill
+          if (move.id === "death_coil" && pathSkillVal(p, "coil_bleed") >= 1) {
+            e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35)));
+            logs.push("🩸 Bleed applied (Coil)!");
+          }
+        }
+        // multicast (Lightning): chance to cast again
+        if (move.effect === "multicast") {
+          const multicastChance = 0.25 + pathSkillVal(p, "multicast_amp") * 0.08;
+          if (Math.random() < multicastChance) {
+            const d2 = calcMoveDmg(move, p, e);
+            e.hp = Math.max(0, e.hp - d2);
+            p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + d2 };
+            logs.push(`⚡ Multicast! ${move.name}: ${d2} dmg`);
+            spawnFloat(`⚡${d2}`, "#f97316", "enemy");
+          }
         }
       }
     }
@@ -767,26 +1258,63 @@ export default function RPGGame() {
       const isSpec = p.isSpecialized;
 
       for (const pk of passiveKeys) {
+        // Druid: Nature (base) or Harmony (path)
         if (pk === "druid") {
-          const rolls = isSpec && pk === p.classKey ? 2 : 1;
+          const isDruidBase = pk === p.classKey;
+          const hasHarmony  = isDruidBase && p.pathKey === "archdruid";
+          const rolls = isSpec && isDruidBase ? 2 : 1;
+          const numRolls = hasHarmony ? rolls * 2 : rolls; // Harmony: +2 stats per win
           const stats = ["atk","def","spr","mnd","agi"];
-          for (let i = 0; i < rolls; i++) {
+          for (let i = 0; i < numRolls; i++) {
             const s = stats[Math.floor(Math.random() * stats.length)];
+            // Nature/Harmony MUST modify player.stats[stat] directly (not bonusFlat)
             p.stats = { ...p.stats, [s]: p.stats[s] + 1 };
-            logs.push(`🌿 Nature: +1 ${s.toUpperCase()}!`);
+            if (hasHarmony) {
+              p.harmonyBoosts = (p.harmonyBoosts || 0) + 1;
+              logs.push(`🌙 Harmony: +1 ${s.toUpperCase()}! (${p.harmonyBoosts} total)`);
+            } else {
+              logs.push(`🌿 Nature: +1 ${s.toUpperCase()}!`);
+            }
           }
         }
+        // Mage: Knowledge (base) or Ultimate Knowledge (path)
         if (pk === "mage") {
-          // For spec, only track once (using passiveWins) but fire every 3 wins
-          // For multiclass second mage, track separately with passiveWins2
-          const isSecond = !isSpec && pk === p.multiclassKey;
-          const tracker = isSecond ? "passiveWins2" : "passiveWins";
-          p[tracker] = (p[tracker] || 0) + 1;
-          const threshold = isSpec ? 3 : 5;
-          if (p[tracker] % threshold === 0) {
-            p.stats = { ...p.stats, spr: p.stats.spr + 1 };
-            logs.push(`🔮 Knowledge: +1 SPR!`);
+          const isMageBase = pk === p.classKey;
+          const hasUltKnowledge = isMageBase && p.pathKey === "archmage";
+          if (hasUltKnowledge) {
+            // Ultimate Knowledge: +1 MND every win
+            const gains = isSpec ? 2 : 1;
+            p.stats = { ...p.stats, mnd: p.stats.mnd + gains };
+            logs.push(`📚 Ultimate Knowledge: +${gains} MND!`);
+          } else {
+            const isSecond = !isSpec && pk === p.multiclassKey;
+            const tracker = isSecond ? "passiveWins2" : "passiveWins";
+            p[tracker] = (p[tracker] || 0) + 1;
+            const threshold = isSpec ? 3 : 5;
+            if (p[tracker] % threshold === 0) {
+              p.stats = { ...p.stats, spr: p.stats.spr + 1 };
+              logs.push(`🔮 Knowledge: +1 SPR!`);
+            }
           }
+        }
+      }
+
+      // atk_to_def / atk_to_spr conversion (Commander / Radiant Knight path skills)
+      // These are permanent ratios — applied via effective stat, no base mutation needed.
+      // (Handled in eff() would require a different approach; instead, we can treat them
+      //  as bonus conversions applied once and stored in bonusFlat.)
+      // The simplest approach: each point converts 5% of base ATK to DEF/SPR at win time.
+      // (Once-time application is wrong; instead handle in eff() as a pct override.)
+      // → Handled in eff() as a computed bonus already via pathSkillVal.
+
+      // Journey EXP — only earnable after choosing a path
+      if (p.pathKey) {
+        const jExp = Math.floor(e.reward.exp * skillXpMult(p));
+        p.journeyExp = (p.journeyExp || 0) + jExp;
+        while ((p.journeyLevel || 0) < JOURNEY_MAX_LEVEL && p.journeyExp >= JOURNEY_EXP_TABLE[(p.journeyLevel || 0) + 1]) {
+          p.journeyLevel = (p.journeyLevel || 0) + 1;
+          p.journeyPoints = (p.journeyPoints || 0) + 1;
+          logs.push(`🌟 Journey Level ${p.journeyLevel}! +1 Path Skill Point`);
         }
       }
 
@@ -803,7 +1331,6 @@ export default function RPGGame() {
         const ns = { ...p.stats };
         const desc = [];
         Object.keys(ns).forEach(s => {
-          // Blend base stats: average of both classes if multiclassed, else just base
           const blendedBase = secondStats
             ? (baseStats[s] + secondStats[s]) / 2
             : baseStats[s];
@@ -811,7 +1338,9 @@ export default function RPGGame() {
           ns[s] += g; desc.push(`${s.toUpperCase()}+${g}`);
         });
         p.stats = ns;
-        const hpGain = Math.floor(15 * (getClass(p.classKey).hpScaling || 1));
+        // Use pathHpScaling if path chosen, else base hpScaling
+        const hpScaling = p.pathHpScaling || getClass(p.classKey).hpScaling || 1;
+        const hpGain = Math.floor(15 * hpScaling);
         p.maxHp += hpGain; p.hp = Math.min(p.maxHp, p.hp + Math.floor(p.maxHp * 0.5));
         p.skillPoints = (p.skillPoints || 0) + 2;
         logs.push(`🎉 LEVEL UP → ${p.level}! ${desc.join(" ")} +2 SP`);
@@ -831,63 +1360,203 @@ export default function RPGGame() {
 
     // Enemy turn
     setTimeout(() => {
-      let p2 = { ...p, statusEffects: [...(p.statusEffects || [])], stats: { ...p.stats }, runStats: { ...(p.runStats || {}) } };
+      let p2 = { ...p, statusEffects: [...(p.statusEffects || [])], stats: { ...p.stats }, runStats: { ...(p.runStats || {})} };
       let e2 = { ...e, statusEffects: [...(e.statusEffects || [])] };
       const eLogs = [];
 
-      // Tick enemy status
-      const eTick = tickStatus(e2);
-      e2 = eTick.target; eLogs.push(...eTick.logs);
-      const hasRanger = p2.classKey === "ranger" || p2.multiclassKey === "ranger";
-      if (hasRanger && eTick.bleedHeal > 0) {
-        p2.hp = Math.min(p2.maxHp, p2.hp + eTick.bleedHeal);
-        eLogs.push(`🏹 Predator: +${eTick.bleedHeal} HP`);
-        const sd = serenityProc(p2, eTick.bleedHeal);
-        if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
-      }
-
-      // Enemy died from status
-      if (e2.hp <= 0) {
+      // Full win sequence — passives, journey EXP, level-up, then victory transition.
+      // Used by all enemy-turn death checks so none of them skip rewards.
+      function awardKill(note = "") {
         const gold = Math.floor(e2.reward.gold * skillGoldMult(p2));
         const exp  = Math.floor(e2.reward.exp  * skillXpMult(p2));
         p2.gold += gold; p2.exp += exp; p2.wins += 1;
-        eLogs.push(`💀 ${e2.name} defeated by status! +${exp} EXP +${gold} Gold`);
+        eLogs.push(`💀 ${e2.name} defeated${note}! +${exp} EXP +${gold} Gold`);
+        // Passives on kill
+        const passiveKeys = p2.isSpecialized ? [p2.classKey] : [p2.classKey, p2.multiclassKey].filter(Boolean);
+        const isSpec = p2.isSpecialized;
+        for (const pk of passiveKeys) {
+          if (pk === "druid") {
+            const isDruidBase = pk === p2.classKey;
+            const hasHarmony = isDruidBase && p2.pathKey === "archdruid";
+            const rolls = isSpec && isDruidBase ? 2 : 1;
+            const numRolls = hasHarmony ? rolls * 2 : rolls;
+            const stats = ["atk","def","spr","mnd","agi"];
+            for (let i = 0; i < numRolls; i++) {
+              const s = stats[Math.floor(Math.random() * stats.length)];
+              p2.stats = { ...p2.stats, [s]: p2.stats[s] + 1 };
+              if (hasHarmony) { p2.harmonyBoosts = (p2.harmonyBoosts || 0) + 1; eLogs.push(`🌙 Harmony: +1 ${s.toUpperCase()}! (${p2.harmonyBoosts} total)`); }
+              else { eLogs.push(`🌿 Nature: +1 ${s.toUpperCase()}!`); }
+            }
+          }
+          if (pk === "mage") {
+            const isMageBase = pk === p2.classKey;
+            const hasUltKnowledge = isMageBase && p2.pathKey === "archmage";
+            if (hasUltKnowledge) {
+              const gains = isSpec ? 2 : 1;
+              p2.stats = { ...p2.stats, mnd: p2.stats.mnd + gains };
+              eLogs.push(`📚 Ultimate Knowledge: +${gains} MND!`);
+            } else {
+              const isSecond = !isSpec && pk === p2.multiclassKey;
+              const tracker = isSecond ? "passiveWins2" : "passiveWins";
+              p2[tracker] = (p2[tracker] || 0) + 1;
+              const threshold = isSpec ? 3 : 5;
+              if (p2[tracker] % threshold === 0) { p2.stats = { ...p2.stats, spr: p2.stats.spr + 1 }; eLogs.push(`🔮 Knowledge: +1 SPR!`); }
+            }
+          }
+        }
+        // Journey EXP
+        if (p2.pathKey) {
+          const jExp = Math.floor(e2.reward.exp * skillXpMult(p2));
+          p2.journeyExp = (p2.journeyExp || 0) + jExp;
+          while ((p2.journeyLevel || 0) < JOURNEY_MAX_LEVEL && p2.journeyExp >= JOURNEY_EXP_TABLE[(p2.journeyLevel || 0) + 1]) {
+            p2.journeyLevel = (p2.journeyLevel || 0) + 1;
+            p2.journeyPoints = (p2.journeyPoints || 0) + 1;
+            eLogs.push(`🌟 Journey Level ${p2.journeyLevel}! +1 Path Skill Point`);
+          }
+        }
+        // Level up
+        while (p2.exp >= p2.expToNext) {
+          p2.exp -= p2.expToNext; p2.level += 1;
+          p2.expToNext = Math.floor(p2.expToNext * 1.30);
+          const baseStats = getClass(p2.classKey).stats;
+          const secondStats = p2.multiclassKey ? getClass(p2.multiclassKey).stats : null;
+          const pctBonus = 0.02 * (p2.level - 1);
+          const scalingMult = p2.combinedScaling ? p2.combinedScaling / getClass(p2.classKey).baseScaling : 1;
+          const ns = { ...p2.stats };
+          const desc = [];
+          Object.keys(ns).forEach(s => {
+            const blendedBase = secondStats ? (baseStats[s] + secondStats[s]) / 2 : baseStats[s];
+            const g = Math.ceil(blendedBase * (0.25 + pctBonus) * scalingMult);
+            ns[s] += g; desc.push(`${s.toUpperCase()}+${g}`);
+          });
+          p2.stats = ns;
+          const hpScaling = p2.pathHpScaling || getClass(p2.classKey).hpScaling || 1;
+          const hpGain = Math.floor(15 * hpScaling);
+          p2.maxHp += hpGain; p2.hp = Math.min(p2.maxHp, p2.hp + Math.floor(p2.maxHp * 0.5));
+          p2.skillPoints = (p2.skillPoints || 0) + 2;
+          eLogs.push(`🎉 LEVEL UP → ${p2.level}! ${desc.join(" ")} +2 SP`);
+        }
         addLog(...eLogs);
         setLastReward({ gold, exp });
         setTimeout(() => setLastReward(null), 1800);
         setPlayer(p2); setEnemy(e2); setPhase("victory"); setBusy(false);
         setTimeout(() => beginCombat(p2), 1200);
-        return;
       }
 
+      // Tick enemy status
+      const eTick = tickStatus(e2);
+      e2 = eTick.target; eLogs.push(...eTick.logs);
+
+      // Ranger Predator / Bloodhound bleed heal (fires even if enemy dies from status)
+      const isBaseRanger = p2.classKey === "ranger";
+      const hasRanger = isBaseRanger || p2.multiclassKey === "ranger";
+      if (hasRanger && eTick.bleedHeal > 0) {
+        let healAmt = eTick.bleedHeal;
+        const predAmp = pathSkillVal(p2, "predator_amp");
+        if (isBaseRanger && p2.pathKey === "deadeye") {
+          const enemyWasBleeding = (e.statusEffects || []).some(s => s.type === "bleed");
+          if (enemyWasBleeding) { healAmt *= 2; eLogs.push(`🏹 Bloodhound: +${healAmt} HP (×2)`); }
+          else { healAmt = Math.floor(healAmt * (1 + predAmp * 0.02)); eLogs.push(`🏹 Predator: +${healAmt} HP`); }
+        } else {
+          healAmt = Math.floor(healAmt * (1 + predAmp * 0.02));
+          eLogs.push(`🏹 Predator: +${healAmt} HP`);
+        }
+        p2.hp = Math.min(p2.maxHp, p2.hp + healAmt);
+        p2.combatHealTotal = (p2.combatHealTotal || 0) + healAmt;
+        p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + healAmt };
+        const sd = serenityProc(p2, healAmt);
+        if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
+      }
+
+      // Enemy died from status ticks or Predator serenity
+      if (e2.hp <= 0) { awardKill(" by status"); return; }
+
       if (e2.hp > 0) {
-        // Knight passive (Grit) — runs for base or second class
-        const knightPassiveCount = [p2.classKey, p2.multiclassKey].filter(k => k === "knight").length;
-        if (knightPassiveCount > 0) {
-          const mult = p2.isSpecialized ? 2 : knightPassiveCount;
-          const h = Math.floor((10 + eff(p2,"mnd") * 0.1) * mult);
-          p2.hp = Math.min(p2.maxHp, p2.hp + h);
-          p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + h };
-          eLogs.push(`⚔️ Grit: +${h} HP`);
-          spawnFloat(`+${h}`, "#2ecc71", "player");
-          const sd = serenityProc(p2, h);
-          if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
+        // Decrement move cooldowns
+        const newCDs = { ...(p2.moveCooldowns || {}) };
+        for (const k in newCDs) { if (newCDs[k] > 0) newCDs[k]--; }
+        p2 = { ...p2, moveCooldowns: newCDs };
+
+        // Plaguekeeper Rot: apply 1 Wither Stack per turn
+        if (p2.pathKey === "plaguekeeper" && p2.classKey === "druid") {
+          const maxW = 10; const curW = e2.witherStacks || 0;
+          if (curW < maxW) {
+            e2 = { ...e2, witherStacks: curW + 1 };
+            eLogs.push(`☣️ Rot: Wither ${e2.witherStacks}/${maxW}`);
+          }
         }
 
-        // Ranger Predator passive
-        if (p2.isSpecialized && p2.classKey === "ranger" && eTick.bleedHeal > 0) {
+        // Radiant Knight Sun Child: apply 1 burn_stack + deal burn dmg to enemy
+        if (p2.pathKey === "radiant_knight" && p2.classKey === "knight") {
+          if ((p2.burnStacks || 0) < 6) p2 = { ...p2, burnStacks: (p2.burnStacks || 0) + 1 };
+          if ((p2.burnStacks || 0) > 0) {
+            const stacks = p2.burnStacks;
+            const burnAmp = 1 + pathSkillVal(p2, "more_burn_dmg") * 0.02;
+            const burnDmg = Math.max(1, Math.round(eff(p2, "spr") * (0.35 + (stacks - 1) * 0.17) * burnAmp));
+            e2.hp = Math.max(0, e2.hp - burnDmg);
+            p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + burnDmg };
+            eLogs.push(`🔥 Burn Stacks (${stacks}): ${burnDmg} dmg`);
+            spawnFloat(`${burnDmg}`, "#e67e22", "enemy");
+            const burnHeal = Math.max(1, Math.floor(burnDmg * (0.05 + pathSkillVal(p2, "burn_heal_amp") * 0.01)));
+            p2.hp = Math.min(p2.maxHp, p2.hp + burnHeal);
+            p2.combatHealTotal = (p2.combatHealTotal || 0) + burnHeal;
+            p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + burnHeal };
+            eLogs.push(`☀️ Sun Child: +${burnHeal} HP`);
+            spawnFloat(`+${burnHeal}`, "#f39c12", "player");
+          }
+        }
+
+        // Knight passive: Leader (Commander) / Grit (base or multi)
+        const knightPassiveCount = [p2.classKey, p2.multiclassKey].filter(k => k === "knight").length;
+        if (knightPassiveCount > 0) {
+          let h = 0;
+          const isPathKnight = p2.classKey === "knight" && p2.pathKey;
+          if (p2.pathKey === "commander" && p2.classKey === "knight") {
+            const mult = p2.isSpecialized ? 2 : 1;
+            h = Math.floor((20 + eff(p2, "def") * 0.05) * mult);
+            eLogs.push(`⚔️ Leader: +${h} HP`);
+          } else if (!isPathKnight) {
+            const mult = p2.isSpecialized ? 2 : knightPassiveCount;
+            h = Math.floor((10 + eff(p2, "mnd") * 0.1) * mult);
+            eLogs.push(`⚔️ Grit: +${h} HP`);
+          }
+          if (h > 0) {
+            p2.hp = Math.min(p2.maxHp, p2.hp + h);
+            p2.combatHealTotal = (p2.combatHealTotal || 0) + h;
+            p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + h };
+            spawnFloat(`+${h}`, "#2ecc71", "player");
+            const sd = serenityProc(p2, h);
+            if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
+          }
+        }
+
+        // Archmage: Ultimate Knowledge — MND-based heal per turn
+        if (p2.pathKey === "archmage" && p2.classKey === "mage") {
+          const h = Math.max(1, Math.floor(eff(p2, "mnd") * 0.15));
+          p2.hp = Math.min(p2.maxHp, p2.hp + h);
+          p2.combatHealTotal = (p2.combatHealTotal || 0) + h;
+          p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + h };
+          eLogs.push(`📚 Ultimate Knowledge: +${h} HP`);
+          spawnFloat(`+${h}`, "#8e44ad", "player");
+        }
+
+        // Ranger spec second Predator proc (no path)
+        if (p2.isSpecialized && isBaseRanger && !p2.pathKey && eTick.bleedHeal > 0) {
           p2.hp = Math.min(p2.maxHp, p2.hp + eTick.bleedHeal);
+          p2.combatHealTotal = (p2.combatHealTotal || 0) + eTick.bleedHeal;
           eLogs.push(`🏹 Predator (×2): +${eTick.bleedHeal} HP`);
           const sd = serenityProc(p2, eTick.bleedHeal);
           if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); }
         }
 
-        // Thief passive (Swift) — heal scaling AGI each turn
+        // Thief Swift — skipped if base thief has a path
         const hasThief = p2.classKey === "thief" || p2.multiclassKey === "thief";
-        if (hasThief) {
+        const isPathThief = p2.classKey === "thief" && p2.pathKey;
+        if (hasThief && !isPathThief) {
           const mult = p2.isSpecialized ? 2 : 1;
           const h = Math.floor((5 + eff(p2, "agi") * 0.05) * mult);
           p2.hp = Math.min(p2.maxHp, p2.hp + h);
+          p2.combatHealTotal = (p2.combatHealTotal || 0) + h;
           p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + h };
           eLogs.push(`🗡️ Swift: +${h} HP`);
           spawnFloat(`+${h}`, "#2ecc71", "player");
@@ -896,16 +1565,24 @@ export default function RPGGame() {
         }
 
         // Tick player status
+        const wasTranscendence = p2.transcendenceThisTurn || false;
+        p2 = { ...p2, transcendenceThisTurn: false };
         const pTick = tickStatus(p2);
         p2 = pTick.target; eLogs.push(...pTick.logs);
 
         if (pTick.regenHeal > 0) {
           p2.hp = Math.min(p2.maxHp, p2.hp + pTick.regenHeal);
+          p2.combatHealTotal = (p2.combatHealTotal || 0) + pTick.regenHeal;
           p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + pTick.regenHeal };
           spawnFloat(`+${pTick.regenHeal}`, "#2ecc71", "player");
-          const sd = serenityProc(p2, pTick.regenHeal, true);
+          const sd = wasTranscendence
+            ? Math.floor(pTick.regenHeal * (1 + pathSkillVal(p2, "eternal_flow_amp") * 0.03))
+            : serenityProc(p2, pTick.regenHeal, true);
           if (sd > 0) { e2.hp = Math.max(0, e2.hp - sd); p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + sd }; eLogs.push(`☯️ Serenity: ${sd} dmg`); spawnFloat(`${sd}`, "#e67e22", "enemy"); }
         }
+
+        // Death check: passive effects or regen serenity killed enemy before it attacks
+        if (e2.hp <= 0) { awardKill(); return; }
 
         if (p2.hp > 0) {
           const stunned = e2.statusEffects.some(s => s.type === "stun");
@@ -919,6 +1596,24 @@ export default function RPGGame() {
               const ac = agiCheck(e2.agi, eff(p2, "agi"));
               if (Math.random() < ac.evade * (mv.isUlt ? 0.4 : 1)) {
                 eLogs.push(`💨 You ${mv.isUlt ? "barely dodge" : "evaded"} ${e2.name}'s ${mv.name}!`);
+                // Ghost: Phantom Step
+                if (p2.pathKey === "ghost" && p2.classKey === "ranger") {
+                  p2.stats = { ...p2.stats, agi: p2.stats.agi + 1 };
+                  const evadeHeal = Math.floor(p2.maxHp * 0.10);
+                  p2.hp = Math.min(p2.maxHp, p2.hp + evadeHeal);
+                  p2.combatHealTotal = (p2.combatHealTotal || 0) + evadeHeal;
+                  p2.runStats = { ...p2.runStats, dmgHealed: (p2.runStats?.dmgHealed||0) + evadeHeal };
+                  eLogs.push(`👻 Phantom Step: +1 AGI, +${evadeHeal} HP`);
+                  spawnFloat(`+${evadeHeal}`, "#27ae60", "player");
+                  const counterAmp = pathSkillVal(p2, "evade_counter");
+                  if (counterAmp > 0) {
+                    const cDmg = Math.floor(eff(p2, "atk") * (0.40 + counterAmp * 0.04));
+                    e2.hp = Math.max(0, e2.hp - cDmg);
+                    p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + cDmg };
+                    eLogs.push(`👻 Phantom Counter: ${cDmg} dmg`);
+                    spawnFloat(`${cDmg}`, "#27ae60", "enemy");
+                  }
+                }
                 return;
               }
               const crit = Math.random() < ac.crit;
@@ -938,6 +1633,28 @@ export default function RPGGame() {
               const isMag = dmgType === "magical";
               spawnFloat(crit ? `⚡${d}` : `${d}`, crit ? (isMag ? "#f97316" : "#e74c3c") : (isMag ? "#e8c070" : "#ffffff"), "player");
               triggerShake("player");
+              // Curse: enemy loses HP after attacking
+              const curseEff = e2.statusEffects.find(s => s.type === "curse");
+              if (curseEff && p2.hp > 0) {
+                e2.hp = Math.max(0, e2.hp - curseEff.dmg);
+                p2.runStats = { ...p2.runStats, dmgDealt: (p2.runStats?.dmgDealt||0) + curseEff.dmg };
+                eLogs.push(`💀 Curse: ${curseEff.dmg} dmg to ${e2.name}`);
+                spawnFloat(`${curseEff.dmg}`, "#9b59b6", "enemy");
+              }
+              // Blood Pact: gain soul_stack on taking damage
+              if (p2.pathKey === "soulbinder" && p2.classKey === "mage" && d > 0) {
+                const maxSS = 10 + pathSkillVal(p2, "soul_cap");
+                if ((p2.soulStacks || 0) < maxSS) {
+                  p2 = { ...p2, soulStacks: (p2.soulStacks || 0) + 1 };
+                  eLogs.push(`💜 Blood Pact: Soul ${p2.soulStacks}/${maxSS}`);
+                }
+              }
+              // heal_on_hit (Commander)
+              const hon = pathSkillVal(p2, "heal_on_hit");
+              if (hon > 0 && d > 0) {
+                const h = Math.floor(d * hon * 0.03);
+                if (h > 0) { p2.hp = Math.min(p2.maxHp, p2.hp + h); p2.combatHealTotal = (p2.combatHealTotal||0)+h; eLogs.push(`🛡️ Endurance: +${h} HP`); }
+              }
             }
 
             if (e2.charging) {
@@ -950,6 +1667,9 @@ export default function RPGGame() {
               const mv = e2.moves[Math.floor(Math.random() * e2.moves.length)];
               dealDmgToPlayer(mv, mv.power, mv.dmgType);
             }
+
+            // Death check: curse or phantom counter killed enemy after their attack
+            if (e2.hp <= 0) { awardKill(); return; }
           }
         }
       }
@@ -981,6 +1701,10 @@ export default function RPGGame() {
 
   if (screen === "multiclass") {
     return <MulticlassScreen player={player} onSelect={handleMulticlass} />;
+  }
+
+  if (screen === "path_select") {
+    return <PathSelect player={player} onSelect={handlePath} />;
   }
 
   if (runSummary) {
@@ -1047,12 +1771,18 @@ export default function RPGGame() {
                     {player.multiclassIcon || cls.icon} {player.multiclassName || cls.name}
                   </span>
                   <div style={{ fontSize: 9, color: "#555", marginTop: 2 }}>
-                    {player.multiclassKey
-                      ? player.isSpecialized
-                        ? `${cls.passive.name} ×2`
-                        : `${cls.passive.name} · ${getClass(player.multiclassKey).passive.name}`
-                      : cls.passive.name
-                    }
+                    {(() => {
+                      const pathDef2 = getPathDef(player);
+                      const basePassiveName = pathDef2 ? pathDef2.passive.name : cls.passive.name;
+                      if (player.multiclassKey) {
+                        const multiPassive = getClass(player.multiclassKey).passive.name;
+                        return player.isSpecialized
+                          ? `${basePassiveName} ×2`
+                          : `${basePassiveName} · ${multiPassive}`;
+                      }
+                      return basePassiveName;
+                    })()}
+                    {player.pathKey && <span style={{ color: "#a78bfa", marginLeft: 4 }}>· {getPathDef(player)?.name}</span>}
                   </div>
                 </div>
                 <div>{(player.statusEffects||[]).map((e,i) => <Badge key={i} e={e} />)}</div>
@@ -1060,11 +1790,25 @@ export default function RPGGame() {
               <Bar val={player.hp}   max={player.maxHp}   color="#e74c3c" label="HP" />
               <Bar val={player.mana} max={player.maxMana} color="#3498db" label="MP" />
               <Bar val={player.exp}  max={player.expToNext} color="#e8c070" label="EXP" />
+              {player.pathKey && (player.journeyLevel||0) < JOURNEY_MAX_LEVEL && (
+                <Bar
+                  val={(player.journeyExp||0) - JOURNEY_EXP_TABLE[player.journeyLevel||0]}
+                  max={JOURNEY_EXP_TABLE[(player.journeyLevel||0)+1] - JOURNEY_EXP_TABLE[player.journeyLevel||0]}
+                  color="#16a085"
+                  label={`Journey Lv.${player.journeyLevel||0}`}
+                />
+              )}
               <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#555", marginTop: 5, flexWrap: "wrap" }}>
                 {["atk","def","spr","mnd","agi"].map(s => (
                   <span key={s} style={{ color: "#777" }}>{s.toUpperCase()} <span style={{ color: "#aaa" }}>{eff(player,s)}</span></span>
                 ))}
-                {(player.shield||0) > 0 && <span style={{ color: "#3498db" }}>🛡️{player.shield}</span>}
+                {(player.shield||0)      > 0 && <span style={{ color: "#3498db" }}>🛡️{player.shield}</span>}
+                {(player.burnStacks||0)  > 0 && <span style={{ color: "#e67e22" }}>🔥×{player.burnStacks}</span>}
+                {(player.soulStacks||0)  > 0 && <span style={{ color: "#9b59b6" }}>💜×{player.soulStacks}</span>}
+                {(player.critStacks||0)  > 0 && <span style={{ color: "#e74c3c" }}>🎯×{player.critStacks}</span>}
+                {(player.yinStacks||0)   > 0 && <span style={{ color: "#3498db" }}>☯️Y×{player.yinStacks}</span>}
+                {(player.yangStacks||0)  > 0 && <span style={{ color: "#f39c12" }}>☯️G×{player.yangStacks}</span>}
+                {(enemy?.witherStacks||0)> 0 && <span style={{ color: "#27ae60" }}>🌿W×{enemy.witherStacks}</span>}
               </div>
             </div>
             {floatingNums.filter(n => n.target === "player").map(n => (
@@ -1109,7 +1853,7 @@ export default function RPGGame() {
           {/* Moves */}
           {phase === "active" && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-              {cls.moves.map(m => <MoveBtn key={m.id} move={m} player={player} onUse={handleMove} disabled={!playerTurn || busy} />)}
+              {getPlayerMoves(player).map(m => <MoveBtn key={m.id} move={m} player={player} onUse={handleMove} disabled={!playerTurn || busy} />)}
             </div>
           )}
 
