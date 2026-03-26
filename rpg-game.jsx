@@ -446,7 +446,7 @@ function ShopScreen({ player, setPlayer, setScreen }) {
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {[{ tier: 1, price: t1p, label: "T1 +1/+5%" }, { tier: 2, price: t2p, label: "T2 +5/+10%", gold: true }, { tier: 3, price: t3p, label: "T3 +15/+25%", gem: true }].map(({ tier, price, label, gold, gem }) => {
+                    {[{ tier: 1, price: t1p, label: "T1 +1/+5%" }, { tier: 2, price: t2p, label: "T2 +5/+10%", gold: true }, { tier: 3, price: t3p, label: "T3 +15/+20%", gem: true }].map(({ tier, price, label, gold, gem }) => {
                       const can = player.gold >= price;
                       return (
                         <button key={tier} onClick={() => buyItem(item, tier)} disabled={!can} style={{
@@ -911,12 +911,20 @@ export default function RPGGame() {
       moveCooldowns: {}, combatHealTotal: 0,
       transcendenceThisTurn: false,
     };
+    const isBoss = p.wins > 0 && p.wins % 25 === 0;
+    if (isBoss) {
+      p = { ...p, hp: p.maxHp, mana: p.maxMana };
+    }
     const e = spawnEnemy(p.wins, p.level);
     setEnemy(e); setLog([]); setPhase("active");
     setPlayerTurn(true); setScreen("combat"); setBusy(false);
     setPlayer(p);
-    const isBoss = p.wins > 0 && p.wins % 25 === 0;
-    addLog(isBoss ? `⚠️ BOSS — ${e.icon} ${e.name} approaches!` : `${e.icon} ${e.name} appears!`);
+    if (isBoss) {
+      addLog(`✨ You feel your strength return. HP and MP fully restored!`);
+      addLog(`⚠️ BOSS — ${e.icon} ${e.name} approaches!`);
+    } else {
+      addLog(`${e.icon} ${e.name} appears!`);
+    }
   }
 
   function handleNewGame() { setScreen("class_select"); }
@@ -1349,6 +1357,7 @@ export default function RPGGame() {
         logs.push(`🎉 LEVEL UP → ${p.level}! ${desc.join(" ")} +2 SP`);
       }
 
+      p.mana = Math.min(p.maxMana, p.mana + getManaRegen(p));
       addLog(...logs);
       setLastReward({ gold, exp });
       setTimeout(() => setLastReward(null), 1800);
@@ -1439,6 +1448,7 @@ export default function RPGGame() {
           p2.skillPoints = (p2.skillPoints || 0) + 2;
           eLogs.push(`🎉 LEVEL UP → ${p2.level}! ${desc.join(" ")} +2 SP`);
         }
+        p2.mana = Math.min(p2.maxMana, p2.mana + getManaRegen(p2));
         addLog(...eLogs);
         setLastReward({ gold, exp });
         setTimeout(() => setLastReward(null), 1800);

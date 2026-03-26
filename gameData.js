@@ -86,7 +86,7 @@ export const ENEMY_POOL = [
 ];
 
 export const BOSS_POOL = [
-  { name: "Bandit King",   icon: "👑", isBoss: true, baseHp: 200, baseAtk: 18, baseDef: 12, baseSpr: 8,  baseMnd: 6,  baseAgi: 10, reward: { gold: 150, exp: 200 }, moves: [{ name: "Reign Slash", type: "atk", dmgType: "physical", power: 1.0 }, { name: "Execution",    type: "atk", dmgType: "physical", power: 1.8 }], ult: { name: "Kingslayer",    dmgType: "physical", power: 3.0 } },
+  { name: "Bandit King",   icon: "👑", isBoss: true, baseHp: 150, baseAtk: 14, baseDef: 9,  baseSpr: 8,  baseMnd: 6,  baseAgi: 10, reward: { gold: 150, exp: 200 }, moves: [{ name: "Reign Slash", type: "atk", dmgType: "physical", power: 1.0 }, { name: "Execution",    type: "atk", dmgType: "physical", power: 1.8 }], ult: { name: "Kingslayer",    dmgType: "physical", power: 3.0 } },
   { name: "Lich",          icon: "☠️", isBoss: true, baseHp: 180, baseAtk: 12, baseDef: 8,  baseSpr: 20, baseMnd: 14, baseAgi: 8,  reward: { gold: 200, exp: 250 }, moves: [{ name: "Soul Leech",  type: "atk", dmgType: "magical",  power: 1.0 }, { name: "Death Coil",   type: "atk", dmgType: "magical",  power: 1.8 }], ult: { name: "Undying Curse", dmgType: "magical",  power: 3.0 } },
   { name: "Ancient Dragon",icon: "🐲", isBoss: true, baseHp: 300, baseAtk: 22, baseDef: 18, baseSpr: 16, baseMnd: 10, baseAgi: 12, reward: { gold: 300, exp: 400 }, moves: [{ name: "Talon Strike",type: "atk", dmgType: "physical", power: 1.0 }, { name: "Inferno Roar", type: "atk", dmgType: "magical",  power: 1.8 }], ult: { name: "Dragon's Wrath",dmgType: "magical",  power: 3.2 } },
 ];
