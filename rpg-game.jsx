@@ -14,13 +14,16 @@ const SAVE_KEY = "realm_of_echoes_save_v1";
 function scaleEnemy(template, wins, playerLevel = 1) {
   const winMult = wins <= 50
   ? Math.pow(1.015, wins)
-  : Math.pow(1.015, 50) * Math.pow(1.025, wins - 50);
+  : wins <= 100
+    ? Math.pow(1.015, 50) * Math.pow(1.025, wins - 50)
+    : Math.pow(1.015, 50) * Math.pow(1.025, 50) * Math.pow(1.035, wins - 100);
   const lvlMult = Math.pow(1.12, playerLevel - 1);
   const s = winMult * lvlMult;
+  const earlyHpFactor = wins <= 25 ? (0.70 + 0.30 * wins / 25) : 1.0;
   const rewardMult = winMult * Math.pow(1.08, playerLevel - 1);
   return {
     name: template.name, icon: template.icon, isBoss: template.isBoss || false,
-    maxHp: Math.floor(template.baseHp * s), hp: Math.floor(template.baseHp * s),
+    maxHp: Math.floor(template.baseHp * s * earlyHpFactor), hp: Math.floor(template.baseHp * s * earlyHpFactor),
     atk: Math.floor(template.baseAtk * s), def: Math.floor(template.baseDef * s),
     spr: Math.floor(template.baseSpr * s), mnd: Math.floor(template.baseMnd * s),
     agi: Math.floor(template.baseAgi * s),
@@ -323,7 +326,7 @@ function MoveBtn({ move, player, onUse, disabled, isFree }) {
       </div>
       <div style={{ fontSize: 10, color: "#777" }}>{move.desc}</div>
       <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>
-        {move.manaCost > 0 ? `💧${move.manaCost}` : "Free"} · {move.dmgType === "physical" ? "⚔️" : move.dmgType === "magical" ? "✨" : move.dmgType === "chi" ? "☯️" : move.dmgType === "void" ? "🌀" : "💚"}
+        {(isFree || move.manaCost === 0) ? "Free" : `💧${move.manaCost}`} ·{move.dmgType === "physical" ? "⚔️" : move.dmgType === "magical" ? "✨" : move.dmgType === "chi" ? "☯️" : move.dmgType === "void" ? "🌀" : "💚"}
         {move.effect ? ` · ${effectIcons[move.effect] || ""}` : ""}
         {move.cooldown ? ` · CD:${move.cooldown}` : ""}
       </div>
@@ -1268,8 +1271,7 @@ export default function RPGGame() {
           const stats = ["atk","def","spr","mnd","agi"];
           for (let i = 0; i < numRolls; i++) {
             const s = stats[Math.floor(Math.random() * stats.length)];
-            // Nature/Harmony MUST modify player.stats[stat] directly (not bonusFlat)
-            p.stats = { ...p.stats, [s]: p.stats[s] + 1 };
+            p.bonusFlat = { ...p.bonusFlat, [s]: (p.bonusFlat[s] || 0) + 1 };
             if (hasHarmony) {
               p.harmonyBoosts = (p.harmonyBoosts || 0) + 1;
               logs.push(`🌙 Harmony: +1 ${s.toUpperCase()}! (${p.harmonyBoosts} total)`);
@@ -1285,7 +1287,7 @@ export default function RPGGame() {
           if (hasUltKnowledge) {
             // Ultimate Knowledge: +1 MND every win
             const gains = isSpec ? 2 : 1;
-            p.stats = { ...p.stats, mnd: p.stats.mnd + gains };
+            p.bonusFlat = { ...p.bonusFlat, mnd: (p.bonusFlat.mnd || 0) + gains };
             logs.push(`📚 Ultimate Knowledge: +${gains} MND!`);
           } else {
             const isSecond = !isSpec && pk === p.multiclassKey;
@@ -1293,7 +1295,7 @@ export default function RPGGame() {
             p[tracker] = (p[tracker] || 0) + 1;
             const threshold = isSpec ? 3 : 5;
             if (p[tracker] % threshold === 0) {
-              p.stats = { ...p.stats, spr: p.stats.spr + 1 };
+              p.bonusFlat = { ...p.bonusFlat, spr: (p.bonusFlat.spr || 0) + 1 };
               logs.push(`🔮 Knowledge: +1 SPR!`);
             }
           }
@@ -1384,7 +1386,7 @@ export default function RPGGame() {
             const stats = ["atk","def","spr","mnd","agi"];
             for (let i = 0; i < numRolls; i++) {
               const s = stats[Math.floor(Math.random() * stats.length)];
-              p2.stats = { ...p2.stats, [s]: p2.stats[s] + 1 };
+              p2.bonusFlat = { ...p2.bonusFlat, [s]: (p2.bonusFlat[s] || 0) + 1 };
               if (hasHarmony) { p2.harmonyBoosts = (p2.harmonyBoosts || 0) + 1; eLogs.push(`🌙 Harmony: +1 ${s.toUpperCase()}! (${p2.harmonyBoosts} total)`); }
               else { eLogs.push(`🌿 Nature: +1 ${s.toUpperCase()}!`); }
             }
@@ -1394,14 +1396,14 @@ export default function RPGGame() {
             const hasUltKnowledge = isMageBase && p2.pathKey === "archmage";
             if (hasUltKnowledge) {
               const gains = isSpec ? 2 : 1;
-              p2.stats = { ...p2.stats, mnd: p2.stats.mnd + gains };
+              p2.bonusFlat = { ...p2.bonusFlat, mnd: (p2.bonusFlat.mnd || 0) + gains };
               eLogs.push(`📚 Ultimate Knowledge: +${gains} MND!`);
             } else {
               const isSecond = !isSpec && pk === p2.multiclassKey;
               const tracker = isSecond ? "passiveWins2" : "passiveWins";
               p2[tracker] = (p2[tracker] || 0) + 1;
               const threshold = isSpec ? 3 : 5;
-              if (p2[tracker] % threshold === 0) { p2.stats = { ...p2.stats, spr: p2.stats.spr + 1 }; eLogs.push(`🔮 Knowledge: +1 SPR!`); }
+              if (p2[tracker] % threshold === 0) { p2.bonusFlat = { ...p2.bonusFlat, spr: (p2.bonusFlat.spr || 0) + 1 }; eLogs.push(`🔮 Knowledge: +1 SPR!`); }
             }
           }
         }

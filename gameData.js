@@ -92,11 +92,11 @@ export const BOSS_POOL = [
 ];
 
 export const SHOP_ITEMS = [
-  { id: "weapon",      name: "Weapon",      stat: "atk", icon: "⚔️", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 25 } },
-  { id: "armor",       name: "Armor",       stat: "def", icon: "🛡️", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 25 } },
-  { id: "spirit_orb",  name: "Spirit Orb",  stat: "spr", icon: "🔮", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 25 } },
-  { id: "mind_tome",   name: "Mind Tome",   stat: "mnd", icon: "📖", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 25 } },
-  { id: "swift_boots", name: "Swift Boots", stat: "agi", icon: "👟", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 25 } },
+  { id: "weapon",      name: "Weapon",      stat: "atk", icon: "⚔️", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 20 } },
+  { id: "armor",       name: "Armor",       stat: "def", icon: "🛡️", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 20 } },
+  { id: "spirit_orb",  name: "Spirit Orb",  stat: "spr", icon: "🔮", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 20 } },
+  { id: "mind_tome",   name: "Mind Tome",   stat: "mnd", icon: "📖", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 20 } },
+  { id: "swift_boots", name: "Swift Boots", stat: "agi", icon: "👟", t1: { price: 100, flat: 1, pct: 5 }, t2: { price: 400, flat: 5, pct: 10 }, t3: { price: 1200, flat: 15, pct: 20 } },
 ];
 
 export const SKILLS_DEF = [
