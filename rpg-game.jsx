@@ -123,6 +123,7 @@ function getPlayerMoves(player) {
   const moves = [...cls.moves];
   moves[0] = pathDef.newMoves[0];
   moves[1] = pathDef.newMoves[1];
+  if (pathDef.healMove) moves[3] = pathDef.healMove;
   const defIdx = moves.findIndex(m => m.id === pathDef.defMoveRename.renamedFrom);
   if (defIdx >= 0) moves[defIdx] = { ...moves[defIdx], id: pathDef.defMoveRename.id, name: pathDef.defMoveRename.name };
   return moves;
@@ -169,11 +170,12 @@ function calcMoveDmg(move, player, enemy) {
   else if (ss === "agi")     atkStat = eff(player, "agi");
   else if (ss === "spr")     atkStat = eff(player, "spr");
   else if (ss === "atk")     atkStat = eff(player, "atk");
-  else if (ss === "spr+mnd") atkStat = Math.floor((eff(player, "spr") + eff(player, "mnd")) / 2);
+  else if (ss === "spr+mnd")     atkStat = Math.floor((eff(player, "spr") + eff(player, "mnd")) / 2);
+  else if (ss === "atk+spr_avg") atkStat = Math.floor((eff(player, "atk") + eff(player, "spr")) / 2);
   else if (move.dmgType === "physical") atkStat = eff(player, "atk");
   else if (move.dmgType === "magical")  atkStat = eff(player, "spr");
   else                                   atkStat = eff(player, "mnd");
-  if (move.dmgType === "chi")  return calcChiDmg(eff(player, "mnd"), penDef, move.power);
+  if (move.dmgType === "chi")  return calcChiDmg(ss ? atkStat : eff(player, "mnd"), penDef, move.power);
   if (move.dmgType === "void") return calcVoidDmg(eff(player, "mnd"), enemy.mnd, move.power);
   if (move.dmgType === "physical") return calcPhysDmg(atkStat, penDef, move.power);
   return calcMagDmg(atkStat, enemy.mnd, move.power);
@@ -217,7 +219,7 @@ function tickStatus(target) {
       // Toxicology: poison grows 10% per active turn (ageBonus accumulates)
       const aged = Math.max(1, Math.floor(e.dmg * (1 + (e.ageBonus || 0))));
       totalDotDmg += aged;
-      logs.push(`☠️ Poison: ${aged} dmg`);
+      logs.push(`🧪 Poison: ${aged} dmg`);
       return { ...e, turns: e.turns - 1, ageBonus: (e.ageBonus || 0) + 0.10 };
     }
     return e;
@@ -310,7 +312,7 @@ function MoveBtn({ move, player, onUse, disabled, isFree }) {
   const ok  = (isFree || player.mana >= move.manaCost) && cd === 0;
   const col = { atk: "#c0392b", def: "#2980b9", heal: "#16a085", regen: "#e67e22", "heal+atk": "#16a085" }[move.type] || "#666";
   const [hover, setHover] = useState(false);
-  const effectIcons = { burn:"🔥", bleed:"🩸", drain:"💜", stun:"💫", poison:"☠️", curse:"💀", burn_stack:"🔥", consume_burn:"💥", "poison+bleed":"☠️🩸" };
+  const effectIcons = { burn:"🔥", bleed:"🩸", drain:"💜", stun:"💫", poison:"🧪", curse:"💀", burn_stack:"🔥", consume_burn:"💥", "poison+bleed":"🧪🩸" };
   return (
     <button onClick={() => onUse(move)} disabled={disabled || !ok}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
@@ -981,6 +983,19 @@ export default function RPGGame() {
     }
 
     if (move.type === "heal") {
+      if (move.id === "phantom_mend") {
+        const h = Math.floor(eff(p, "agi") * 1.2 + 10);
+        p.hp = Math.min(p.maxHp, p.hp + h);
+        p.combatHealTotal = (p.combatHealTotal || 0) + h;
+        p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
+        logs.push(`💨 ${move.name}: Healed ${h} HP`);
+        spawnFloat(`+${h}`, "#2ecc71", "player");
+        const regenVal = Math.max(1, Math.floor(eff(p, "agi") * 0.3));
+        p = applyEffect(p, "regen", regenVal, { addTurns: 2 });
+        logs.push(`💨 Swiftness Regen: ${regenVal}/turn (2 turns)`);
+        const sd = serenityProc(p, h);
+        if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+      } else {
       const h = calcHeal(eff(p, "mnd"));
       p.hp = Math.min(p.maxHp, p.hp + h);
       p.combatHealTotal = (p.combatHealTotal || 0) + h;
@@ -989,6 +1004,7 @@ export default function RPGGame() {
       p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + h };
       const sd = serenityProc(p, h);
       if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+      }
 
     } else if (move.type === "regen") {
       // Inner Focus / Transcendence
@@ -1023,6 +1039,40 @@ export default function RPGGame() {
       }
 
     } else if (move.type === "heal+atk") {
+      if (move.id === "equilibrium") {
+        // Chi strike using avg of ATK+SPR, then heal 30% of damage
+        const avgStat = Math.floor((eff(p, "atk") + eff(p, "spr")) / 2);
+        const dmg = Math.max(1, calcChiDmg(avgStat, effEnemyDef(e, p), move.power));
+        e.hp = Math.max(0, e.hp - dmg);
+        p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + dmg };
+        logs.push(`☯️ ${move.name}: ${dmg} dmg`);
+        spawnFloat(`${dmg}`, "#e67e22", "enemy");
+        triggerShake("enemy");
+        const healAmt = Math.floor(dmg * 0.30);
+        p.hp = Math.min(p.maxHp, p.hp + healAmt);
+        p.combatHealTotal = (p.combatHealTotal || 0) + healAmt;
+        p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + healAmt };
+        logs.push(`💚 Equilibrium: Healed ${healAmt} HP`);
+        spawnFloat(`+${healAmt}`, "#2ecc71", "player");
+        const sd = serenityProc(p, healAmt);
+        if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+      } else if (move.id === "solar_flare") {
+        // Magical damage scales SPR, heal based on burn stacks
+        const dmg = Math.max(1, calcMagDmg(eff(p, "spr"), e.mnd, move.power));
+        e.hp = Math.max(0, e.hp - dmg);
+        p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + dmg };
+        logs.push(`☀️ ${move.name}: ${dmg} dmg`);
+        spawnFloat(`${dmg}`, "#f97316", "enemy");
+        triggerShake("enemy");
+        const healAmt = Math.floor((p.burnStacks || 0) * eff(p, "spr") * 0.20 + 10);
+        p.hp = Math.min(p.maxHp, p.hp + healAmt);
+        p.combatHealTotal = (p.combatHealTotal || 0) + healAmt;
+        p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + healAmt };
+        logs.push(`☀️ Solar Heal: +${healAmt} HP (${p.burnStacks || 0} burn stacks)`);
+        spawnFloat(`+${healAmt}`, "#2ecc71", "player");
+        const sd = serenityProc(p, healAmt);
+        if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+      } else {
       // Verdant Bloom (Archdruid): heal + regen + small dmg to enemy
       const healAmt = Math.max(1, Math.floor(eff(p, "mnd") * (0.4 + pathSkillVal(p, "bloom_amp") * 0.03)));
       p.hp = Math.min(p.maxHp, p.hp + healAmt);
@@ -1042,6 +1092,7 @@ export default function RPGGame() {
       spawnFloat(`${smDmg}`, "#16a085", "enemy");
       const sd = serenityProc(p, healAmt);
       if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+      }
 
     } else {
       // All attack moves
@@ -1144,6 +1195,19 @@ export default function RPGGame() {
         spawnFloat(crit ? `⚡${totalDmg}` : `${totalDmg}`, fcol, "enemy");
         triggerShake("enemy");
 
+        // crit_heal: predatory_strike — heal 40% of damage on crit, consume 1 crit stack
+        if (move.effect === "crit_heal" && crit) {
+          const healAmt = Math.floor(totalDmg * 0.40);
+          p.hp = Math.min(p.maxHp, p.hp + healAmt);
+          p.combatHealTotal = (p.combatHealTotal || 0) + healAmt;
+          p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + healAmt };
+          if ((p.critStacks || 0) > 0) p.critStacks = Math.max(0, (p.critStacks || 0) - 1);
+          logs.push(`🗡️ Predatory Strike: crit heal +${healAmt} HP`);
+          spawnFloat(`+${healAmt}`, "#2ecc71", "player");
+          const sd = serenityProc(p, healAmt);
+          if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+        }
+
         // Gain crit stack on crit (Assassin)
         if (crit && p.pathKey === "assassin") {
           const maxStacks = 5;
@@ -1208,7 +1272,7 @@ export default function RPGGame() {
           const poisonDmg = calcPoisonDmg(p);
           const dur = 4 + pathSkillVal(p, "poison_duration");
           e = applyEffect(e, "poison", poisonDmg, { duration: dur });
-          logs.push(`☠️ Poison applied! (${poisonDmg}/turn)`);
+          logs.push(`🧪 Poison applied! (${poisonDmg}/turn)`);
           // venom_bleed path skill
           if (move.id === "venom_strike" && pathSkillVal(p, "venom_bleed") >= 1) {
             e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35)));
@@ -1219,13 +1283,13 @@ export default function RPGGame() {
           const poisonDmg = calcPoisonDmg(p);
           const dur = 4 + pathSkillVal(p, "poison_duration");
           e = applyEffect(e, "refresh_poison", poisonDmg, { duration: dur });
-          logs.push("☠️ Poison refreshed!");
+          logs.push("🧪 Poison refreshed!");
         }
         if (move.effect === "poison+bleed") {
           const poisonDmg = calcPoisonDmg(p);
           const dur = 4 + pathSkillVal(p, "poison_duration");
           e = applyEffect(e, "poison", poisonDmg, { duration: dur });
-          logs.push(`☠️ Poison applied! (${poisonDmg}/turn)`);
+          logs.push(`🧪 Poison applied! (${poisonDmg}/turn)`);
           e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35)));
           logs.push("🩸 Bleed applied!");
           if (pathSkillVal(p, "spore_burn") >= 1) {

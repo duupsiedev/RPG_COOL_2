@@ -208,6 +208,7 @@ export const PATHS_DATA = {
         { id: "radiance", name: "Radiance", type: "atk", dmgType: "magical", power: 1.0, manaCost: 15, effect: "burn_stack",  desc: "Blazing aura strike. Applies 1 Burn Stack." },
         { id: "immolate", name: "Immolate", type: "atk", dmgType: "magical", power: 1.2, manaCost: 20, effect: "consume_burn", desc: "Consume all Burn Stacks for massive fire dmg. Power = 1.2 × spr × (1 + stacks×0.5), cap 3.0×. Resets stacks." },
       ],
+      healMove: { id: "solar_flare", name: "Solar Flare", type: "heal+atk", dmgType: "magical", power: 1.0, manaCost: 15, scalesStat: "spr", effect: "burn_stack_heal", desc: "Magical burst. Deals damage and heals based on active burn stacks." },
       defMoveRename: { id: "flame_shield", name: "Flame Shield", renamedFrom: "fortify" },
       pathSkills: [
         { key: "atk_to_spr",    label: "Solar Conversion", desc: "Convert 5% ATK to SPR per point",                    max: 10, cost: 1 },
@@ -242,6 +243,7 @@ export const PATHS_DATA = {
         { id: "shadowstep",    name: "Shadowstep",    type: "def", dmgType: "physical", power: 1.0, manaCost: 10, scalesStat: "agi", desc: "Vanish and reposition. Shield scales with AGI." },
         { id: "phantom_arrow", name: "Phantom Arrow", type: "atk", dmgType: "physical", power: 1.2, manaCost: 15, scalesStat: "agi", desc: "Strike from the void. Scales AGI instead of ATK." },
       ],
+      healMove: { id: "phantom_mend", name: "Phantom Mend", type: "heal", dmgType: "heal", manaCost: 15, scalesStat: "agi", effect: "regen", regenTurns: 2, desc: "Mend wounds using swiftness. Heals based on AGI, applies 2-turn regen." },
       defMoveRename: { id: "ghost_roll", name: "Ghost Roll", renamedFrom: "dodge_roll" },
       pathSkills: [
         { key: "agi_amp",       label: "Wraith Training", desc: "+2% AGI per point",                                        max: 10, cost: 1  },
@@ -295,6 +297,7 @@ export const PATHS_DATA = {
         { id: "deathmark", name: "Deathmark", type: "atk", dmgType: "physical", power: 1.6, manaCost: 15, effect: "consume_crit_stack", desc: "Guaranteed crit if Crit Stacks > 0, consuming 1 stack." },
         { id: "flurry",    name: "Flurry",    type: "atk", dmgType: "physical", power: 0.6, manaCost: 15, hits: 3,                       desc: "Three rapid strikes. Each hit can crit independently." },
       ],
+      healMove: { id: "predatory_strike", name: "Predatory Strike", type: "atk", dmgType: "physical", power: 1.1, manaCost: 15, effect: "crit_heal", healPctOnCrit: 0.40, consumesCritStack: true, desc: "On crit: heals 40% of damage dealt and consumes 1 crit stack." },
       defMoveRename: { id: "smoke_veil", name: "Smoke Veil", renamedFrom: "smoke_bomb" },
       pathSkills: [
         { key: "crit_chance_amp", label: "Precision",  desc: "Crit chance +2% per point",       max: 10, cost: 1  },
@@ -387,6 +390,7 @@ export const PATHS_DATA = {
         { id: "inversion_strike", name: "Inversion Strike", type: "atk", dmgType: "physical", power: 1.2, manaCost: 15, scalesStat: "spr", effect: "consume_yin",  desc: "Physical strike that scales SPR. Consumes Yin Stacks for bonus damage." },
         { id: "soul_cannon",      name: "Soul Cannon",      type: "atk", dmgType: "magical",  power: 1.2, manaCost: 15, scalesStat: "atk", effect: "consume_yang", desc: "Magical blast that scales ATK. Consumes Yang Stacks for bonus damage." },
       ],
+      healMove: { id: "equilibrium", name: "Equilibrium", type: "heal+atk", dmgType: "chi", power: 0.9, manaCost: 15, scalesStat: "atk+spr_avg", healPct: 0.30, desc: "Chi strike scaling ATK+SPR average. Heals 30% of damage dealt." },
       defMoveRename: { id: "mirror_stance", name: "Mirror Stance", renamedFrom: "iron_body" },
       pathSkills: [
         { key: "stack_cap",  label: "Deeper Balance", desc: "Yin/Yang stack cap +1 per point (max 5 pts invested)", max: 5,  cost: 1  },
