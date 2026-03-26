@@ -302,9 +302,9 @@ function Log({ lines }) {
   );
 }
 
-function MoveBtn({ move, player, onUse, disabled }) {
+function MoveBtn({ move, player, onUse, disabled, isFree }) {
   const cd  = (player.moveCooldowns || {})[move.id] || 0;
-  const ok  = player.mana >= move.manaCost && cd === 0;
+  const ok  = (isFree || player.mana >= move.manaCost) && cd === 0;
   const col = { atk: "#c0392b", def: "#2980b9", heal: "#16a085", regen: "#e67e22", "heal+atk": "#16a085" }[move.type] || "#666";
   const [hover, setHover] = useState(false);
   const effectIcons = { burn:"🔥", bleed:"🩸", drain:"💜", stun:"💫", poison:"☠️", curse:"💀", burn_stack:"🔥", consume_burn:"💥", "poison+bleed":"☠️🩸" };
@@ -952,7 +952,8 @@ export default function RPGGame() {
 
   function handleMove(move) {
     if (!playerTurn || busy || phase !== "active") return;
-    if (player.mana < move.manaCost) return;
+    const isFirstMove = getPlayerMoves(player)[0]?.id === move.id;
+    if (!isFirstMove && player.mana < move.manaCost) return;
     // Cooldown check
     if ((player.moveCooldowns || {})[move.id] > 0) return;
     setBusy(true);
@@ -961,7 +962,7 @@ export default function RPGGame() {
     let e = { ...enemy,  statusEffects: [...(enemy.statusEffects  || [])] };
     const logs = [];
 
-    p.mana -= move.manaCost;
+    if (!isFirstMove) p.mana -= move.manaCost;
 
     // Set cooldown if this move has one (unless remove_cooldown path skill purchased)
     if (move.cooldown && !(move.id === "meteor" && pathSkillVal(p, "remove_cooldown") >= 1)) {
@@ -1853,7 +1854,7 @@ export default function RPGGame() {
           {/* Moves */}
           {phase === "active" && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-              {getPlayerMoves(player).map(m => <MoveBtn key={m.id} move={m} player={player} onUse={handleMove} disabled={!playerTurn || busy} />)}
+              {getPlayerMoves(player).map((m, idx) => <MoveBtn key={m.id} move={m} player={player} onUse={handleMove} disabled={!playerTurn || busy} isFree={idx === 0} />)}
             </div>
           )}
 
