@@ -704,8 +704,8 @@ function MulticlassScreen({ player, onSelect }) {
               </div>
               <div style={{ fontSize: 10, color: "#666", fontStyle: "italic", borderTop: "1px solid #1a1a2e", paddingTop: 6, marginTop: 4 }}>
                 {isSpec
-                  ? `${baseCls.passive.name} (doubled)`
-                  : `+ ${cls.passive.name}`
+                  ? <><div>{baseCls.passive.name} (doubled)</div><div style={{ color: "#444", marginTop: 3 }}>{baseCls.passive.desc}</div></>
+                  : <><div>+ {cls.passive.name}</div><div style={{ color: "#444", marginTop: 3 }}>{cls.passive.desc}</div></>
                 }
               </div>
             </button>
