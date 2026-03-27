@@ -70,6 +70,17 @@ export const CLASSES = [
     ],
     passive: { name: "Serenity", desc: "Deal 50% of each Regen tick as damage to the enemy" },
   },
+  {
+    key: "artificier", name: "Artificier", icon: "🧪", color: "#e74c3c", baseScaling: 3, hpScaling: 1.3,
+    stats: { atk: 13, def: 8, spr: 13, mnd: 8, agi: 8 },
+    moves: [
+      { id: "molotov",      name: "Molotov",      type: "atk",      dmgType: "magical",  power: 1.0, manaCost: 0,  effect: "burn",  desc: "Throw a burning flask. Applies burn (SPR)." },
+      { id: "shrapnel",     name: "Shrapnel",     type: "atk",      dmgType: "physical", power: 1.0, manaCost: 10, effect: "bleed", desc: "Explosive shrapnel. Applies bleed (ATK)." },
+      { id: "blast_shield", name: "Blast Shield", type: "def",      dmgType: "physical", power: 1.0, manaCost: 10, desc: "Reinforced shield stance. Scales DEF+MND." },
+      { id: "toxic_smoke",  name: "Toxic Smoke",  type: "heal+atk", dmgType: "mixed",    power: 0.45, manaCost: 15, effect: "poison", healPct: 0.50, desc: "Toxic cloud. Scales avg(ATK+SPR). Applies poison. Heals 50% of damage dealt." },
+    ],
+    passive: { name: "Chaos Engineer", desc: "+10% damage per active status effect on the enemy." },
+  },
 ];
 
 export function getClass(key) { return CLASSES.find(c => c.key === key); }
@@ -128,6 +139,14 @@ export const MULTICLASS_NAMES = {
   "monk+ranger":   { name: "Wanderer",     icon: "🍂" },
   "monk+thief":    { name: "Shadow Monk",  icon: "👁️" },
   "druid+monk":    { name: "Ascetic",      icon: "🪷" },
+  // Artificier multiclass
+  "artificier+knight":     { name: "Warbringer",    icon: "💣" },
+  "artificier+ranger":     { name: "Saboteur",      icon: "🎯" },
+  "artificier+mage":       { name: "Arcanist",      icon: "⚗️" },
+  "artificier+thief":      { name: "Bomber",        icon: "💥" },
+  "artificier+druid":      { name: "Toxic Shaman",  icon: "☠️" },
+  "artificier+monk":       { name: "Alchemist",     icon: "🔬" },
+  "artificier+artificier": { name: "Mad Scientist", icon: "🤯" },
 };
 
 export function getMulticlassInfo(key1, key2) {
@@ -398,6 +417,42 @@ export const PATHS_DATA = {
         { key: "stack_cap",  label: "Deeper Balance", desc: "Yin/Yang stack cap +1 per point (max 5 pts invested)", max: 5,  cost: 1  },
         { key: "stack_amp",  label: "Resonance",      desc: "Stack ATK/SPR temp bonus +1% per point (both stacks)", max: 10, cost: 1  },
         { key: "dual_extra", label: "Twin Souls",     desc: "Inversion Strike and Soul Cannon each gain +1 hit",    max: 1,  cost: 10 },
+      ],
+    },
+  ],
+
+  artificier: [
+    {
+      key: "maniac",
+      name: "Maniac",
+      passive: { name: "Overload", desc: "Each time a status is applied on the enemy, deal bonus damage equal to SPR × 0.15." },
+      newMoves: [
+        { id: "thermite",      name: "Thermite",      type: "atk", dmgType: "magical",  power: 1.2, manaCost: 0,  effect: "burn+bleed",   desc: "Incendiary compound. Applies burn AND bleed." },
+        { id: "fragmentation", name: "Fragmentation", type: "atk", dmgType: "physical", power: 1.4, manaCost: 10, effect: "bleed+poison",  desc: "Fragmentation grenade. Applies bleed AND poison." },
+      ],
+      defMoveRename: { id: "reinforced_cover", name: "Reinforced Cover", renamedFrom: "blast_shield" },
+      healMove: { id: "acid_smoke", name: "Acid Smoke", type: "heal+atk", dmgType: "mixed", power: 0.6, manaCost: 15, effect: "poison+wither", healPct: 0.50, desc: "Corrosive cloud. Scales avg(ATK+SPR). Applies poison AND wither. Heals 50% of damage dealt." },
+      pathSkills: [
+        { key: "overload_amp",  label: "Volatile Mix",    desc: "Overload bonus dmg +1% SPR per point",    max: 10, cost: 1  },
+        { key: "dot_duration",  label: "Persistent Burn", desc: "All DoT durations +1 turn per point",     max: 5,  cost: 1  },
+        { key: "triple_threat", label: "Triple Threat",   desc: "Thermite also applies poison",             max: 1,  cost: 10 },
+      ],
+    },
+    {
+      key: "catalyst",
+      name: "Catalyst",
+      passive: { name: "Ignition", desc: "Each status consumed: deal SPR × 0.15 bonus dmg + heal SPR × 0.10. Tracks catalystConsumed for Grand Detonation." },
+      newMoves: [
+        { id: "caustic_injection", name: "Caustic Injection", type: "atk", dmgType: "magical",  power: 1.0, manaCost: 15, effect: "apply_poison+consume_burn",  desc: "Apply poison. If burn active: consume it for bonus dmg." },
+        { id: "incendiary_round",  name: "Incendiary Round",  type: "atk", dmgType: "physical", power: 1.0, manaCost: 15, effect: "apply_burn+consume_bleed",   desc: "Apply burn. If bleed active: consume it for bonus dmg." },
+      ],
+      defMoveRename: { id: "bunker", name: "Bunker", renamedFrom: "blast_shield" },
+      healMove: { id: "spike_armor", name: "Spike Armor", type: "def+atk", dmgType: "physical", power: 0.5, manaCost: 10, effect: "bleed+consume_poison+shield", desc: "Defensive stance with spikes. Low dmg, applies bleed, consumes poison for shield bonus." },
+      grandDetonation: { id: "grand_detonation", name: "Grand Detonation", type: "atk", dmgType: "magical", power: 0.25, manaCost: 20, effect: "consume_all_status", desc: "Consume ALL active status on enemy. DMG = catalystConsumed × SPR × 0.25 (cap 10). Resets catalystConsumed." },
+      pathSkills: [
+        { key: "ignition_amp", label: "Chain Reaction",   desc: "Ignition heal +2% SPR per consume per point", max: 10, cost: 1  },
+        { key: "consume_amp",  label: "Volatile Trigger", desc: "Consume bonus dmg +10% per point",             max: 5,  cost: 1  },
+        { key: "grand_amp",    label: "Critical Mass",    desc: "Grand Detonation power +15% per point",        max: 5,  cost: 1  },
       ],
     },
   ],

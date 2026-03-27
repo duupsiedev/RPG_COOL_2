@@ -63,6 +63,7 @@ function initPlayer(classKey) {
     // Per-combat (reset each fight)
     burnStacks: 0, soulStacks: 0, critStacks: 0,
     yinStacks: 0, yangStacks: 0,
+    catalystConsumed: 0,
     moveCooldowns: {}, combatHealTotal: 0,
   };
 }
@@ -123,7 +124,12 @@ function getPlayerMoves(player) {
   const moves = [...cls.moves];
   moves[0] = pathDef.newMoves[0];
   moves[1] = pathDef.newMoves[1];
-  if (pathDef.healMove) moves[3] = pathDef.healMove;
+  if (pathDef.grandDetonation) moves[3] = pathDef.grandDetonation;
+  if (pathDef.healMove && pathDef.key !== "catalyst") moves[3] = pathDef.healMove;
+  if (pathDef.key === "catalyst" && pathDef.healMove) {
+    const bIdx = moves.findIndex(m => m.id === "bunker");
+    if (bIdx >= 0) moves[bIdx] = pathDef.healMove;
+  }
   const defIdx = moves.findIndex(m => m.id === pathDef.defMoveRename.renamedFrom);
   if (defIdx >= 0) moves[defIdx] = { ...moves[defIdx], id: pathDef.defMoveRename.id, name: pathDef.defMoveRename.name };
   return moves;
@@ -155,6 +161,7 @@ function applyPath(player, pathKey) {
     pathHpScaling: (cls.hpScaling || 1) * 1.5,
     burnStacks: 0, soulStacks: 0, critStacks: 0,
     yinStacks: 0, yangStacks: 0,
+    catalystConsumed: 0,
     harmonyBoosts: player.harmonyBoosts || 0,
     moveCooldowns: {}, combatHealTotal: 0,
     maxHp: player.maxHp + 100,
@@ -177,6 +184,11 @@ function calcMoveDmg(move, player, enemy) {
   else if (move.dmgType === "physical") atkStat = eff(player, "atk");
   else if (move.dmgType === "magical")  atkStat = eff(player, "spr");
   else                                   atkStat = eff(player, "mnd");
+  if (move.dmgType === "mixed") {
+    const physPart = calcPhysDmg(eff(player, "atk"), penDef, move.power);
+    const magPart  = calcMagDmg(eff(player, "spr"), enemy.mnd, move.power);
+    return Math.floor((physPart + magPart) / 2);
+  }
   if (move.dmgType === "chi")  return calcChiDmg(ss ? atkStat : eff(player, "mnd"), penDef, move.power);
   if (move.dmgType === "void") return calcVoidDmg(eff(player, "mnd"), enemy.mnd, move.power);
   if (move.dmgType === "physical") return calcPhysDmg(atkStat, penDef, move.power);
@@ -912,6 +924,7 @@ export default function RPGGame() {
       ...p,
       burnStacks: 0, soulStacks: 0, critStacks: 0,
       yinStacks: 0, yangStacks: 0,
+      catalystConsumed: 0,
       moveCooldowns: {}, combatHealTotal: 0,
       transcendenceThisTurn: false,
     };
@@ -1023,6 +1036,37 @@ export default function RPGGame() {
       logs.push(`☯️ ${move.name}: Regen ${regenVal}/turn (${currentTurns} turns)`);
       spawnFloat(`☯️`, "#e67e22", "player");
 
+    } else if (move.type === "def+atk") {
+      // spike_armor (Catalyst): shield + low phys dmg + bleed + consume poison for bonus shield
+      const saShield = Math.floor(eff(p, "def") * 0.6 + eff(p, "mnd") * 0.4);
+      p.shield = (p.shield || 0) + saShield;
+      logs.push(`🛡️ ${move.name}: Shielded ${saShield}`);
+      spawnFloat(`🛡${saShield}`, "#3498db", "player");
+      const saDmg = Math.max(1, calcPhysDmg(eff(p, "atk"), effEnemyDef(e, p), move.power));
+      e.hp = Math.max(0, e.hp - saDmg);
+      p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + saDmg };
+      logs.push(`⚔️ ${move.name}: ${saDmg} dmg`);
+      spawnFloat(`${saDmg}`, "#ffffff", "enemy");
+      triggerShake("enemy");
+      e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p, "atk") * 0.35)));
+      logs.push("🩸 Bleed applied!");
+      // Consume poison for bonus shield + Ignition proc (Catalyst)
+      const saPoisonIdx = (e.statusEffects || []).findIndex(s => s.type === "poison");
+      if (saPoisonIdx >= 0) {
+        const saExtraShield = Math.floor(eff(p, "def") * 0.3);
+        p.shield = (p.shield || 0) + saExtraShield;
+        e = { ...e, statusEffects: e.statusEffects.filter((_, i) => i !== saPoisonIdx) };
+        logs.push(`🧪 Spike Armor: Consumed poison for +${saExtraShield} shield!`);
+        if (p.pathKey === "catalyst" && p.classKey === "artificier") {
+          const saConsumeAmp = pathSkillVal(p, "consume_amp");
+          const saIgniteDmg  = Math.floor(eff(p, "spr") * 0.15 * (1 + saConsumeAmp * 0.10));
+          const saIgniteHeal = Math.floor(eff(p, "spr") * (0.10 + pathSkillVal(p, "ignition_amp") * 0.02));
+          if (saIgniteDmg > 0) { e.hp = Math.max(0, e.hp - saIgniteDmg); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + saIgniteDmg }; logs.push(`⚗️ Ignition: ${saIgniteDmg} dmg`); spawnFloat(`${saIgniteDmg}`, "#e8c070", "enemy"); }
+          if (saIgniteHeal > 0) { p.hp = Math.min(p.maxHp, p.hp + saIgniteHeal); p.combatHealTotal = (p.combatHealTotal || 0) + saIgniteHeal; p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + saIgniteHeal }; logs.push(`⚗️ Ignition: +${saIgniteHeal} HP`); spawnFloat(`+${saIgniteHeal}`, "#2ecc71", "player"); }
+          p.catalystConsumed = (p.catalystConsumed || 0) + 1;
+        }
+      }
+
     } else if (move.type === "def") {
       let shield;
       if (move.scalesStat === "agi") {
@@ -1074,6 +1118,62 @@ export default function RPGGame() {
         spawnFloat(`+${healAmt}`, "#2ecc71", "player");
         const sd = serenityProc(p, healAmt);
         if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+      } else if (move.id === "toxic_smoke") {
+        // Mixed dmg: avg of phys(ATK) + mag(SPR). Heals 50% of dmg. Applies poison.
+        const dmg = Math.max(1, calcMoveDmg(move, p, e));
+        e.hp = Math.max(0, e.hp - dmg);
+        p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + dmg };
+        logs.push(`🧪 ${move.name}: ${dmg} dmg`);
+        spawnFloat(`${dmg}`, "#7f8c8d", "enemy");
+        triggerShake("enemy");
+        const tsPoison = calcPoisonDmg(p);
+        const tsPoisonDur = 4 + pathSkillVal(p, "dot_duration");
+        e = applyEffect(e, "poison", tsPoison, { duration: tsPoisonDur });
+        logs.push(`🧪 Poison applied! (${tsPoison}/turn)`);
+        if (p.pathKey === "maniac" && p.classKey === "artificier") {
+          const ovDmg = Math.floor(eff(p, "spr") * (0.15 + pathSkillVal(p, "overload_amp") * 0.01));
+          if (ovDmg > 0) { e.hp = Math.max(0, e.hp - ovDmg); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + ovDmg }; logs.push(`💥 Overload: ${ovDmg} dmg`); spawnFloat(`${ovDmg}`, "#e74c3c", "enemy"); }
+        }
+        const tsHeal = Math.floor(dmg * 0.50);
+        if (tsHeal > 0) {
+          p.hp = Math.min(p.maxHp, p.hp + tsHeal);
+          p.combatHealTotal = (p.combatHealTotal || 0) + tsHeal;
+          p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + tsHeal };
+          logs.push(`💚 Toxic Smoke: +${tsHeal} HP`);
+          spawnFloat(`+${tsHeal}`, "#2ecc71", "player");
+          const sd = serenityProc(p, tsHeal);
+          if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+        }
+      } else if (move.id === "acid_smoke") {
+        // Maniac healMove: mixed dmg (avg ATK+SPR), applies poison + 1 wither, heals 50% dmg
+        const asDmg = Math.max(1, calcMoveDmg(move, p, e));
+        e.hp = Math.max(0, e.hp - asDmg);
+        p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + asDmg };
+        logs.push(`🧪 ${move.name}: ${asDmg} dmg`);
+        spawnFloat(`${asDmg}`, "#7f8c8d", "enemy");
+        triggerShake("enemy");
+        // Apply poison
+        const asPoison = calcPoisonDmg(p);
+        const asPoisonDur = 4 + pathSkillVal(p, "dot_duration");
+        e = applyEffect(e, "poison", asPoison, { duration: asPoisonDur });
+        logs.push(`🧪 Poison applied! (${asPoison}/turn)`);
+        if (p.pathKey === "maniac" && p.classKey === "artificier") { const ovDmg = Math.floor(eff(p,"spr")*(0.15+pathSkillVal(p,"overload_amp")*0.01)); if(ovDmg>0){e.hp=Math.max(0,e.hp-ovDmg);p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ovDmg};logs.push(`💥 Overload: ${ovDmg} dmg`);spawnFloat(`${ovDmg}`,"#e74c3c","enemy");} }
+        // Apply 1 wither stack
+        const asMaxWither = 10;
+        e.witherStacks = Math.min(asMaxWither, (e.witherStacks || 0) + 1);
+        logs.push(`🌿 Wither: ${e.witherStacks} stack(s) (-${e.witherStacks * 3}% DEF)`);
+        if (p.pathKey === "maniac" && p.classKey === "artificier") { const ovDmg = Math.floor(eff(p,"spr")*(0.15+pathSkillVal(p,"overload_amp")*0.01)); if(ovDmg>0){e.hp=Math.max(0,e.hp-ovDmg);p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ovDmg};logs.push(`💥 Overload: ${ovDmg} dmg`);spawnFloat(`${ovDmg}`,"#e74c3c","enemy");} }
+        // Heal 50% of damage dealt
+        const asHeal = Math.floor(asDmg * 0.50);
+        if (asHeal > 0) {
+          p.hp = Math.min(p.maxHp, p.hp + asHeal);
+          p.combatHealTotal = (p.combatHealTotal || 0) + asHeal;
+          p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + asHeal };
+          logs.push(`💚 Acid Smoke: +${asHeal} HP`);
+          spawnFloat(`+${asHeal}`, "#2ecc71", "player");
+          const sd = serenityProc(p, asHeal);
+          if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
+        }
       } else {
       // Verdant Bloom (Archdruid): heal + regen + small dmg to enemy
       const healAmt = Math.max(1, Math.floor(eff(p, "mnd") * (0.4 + pathSkillVal(p, "bloom_amp") * 0.03)));
@@ -1095,6 +1195,25 @@ export default function RPGGame() {
       const sd = serenityProc(p, healAmt);
       if (sd > 0) { e.hp = Math.max(0, e.hp - sd); p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + sd }; logs.push(`☯️ Serenity: ${sd} dmg`); }
       }
+
+    } else if (move.id === "grand_detonation") {
+      // Grand Detonation (Catalyst): consume all statuses, massive SPR dmg scaled by catalystConsumed
+      const gdCount = Math.min(p.catalystConsumed || 0, 10);
+      const gdAmp   = pathSkillVal(p, "grand_amp");
+      const gdDmg   = Math.floor(gdCount * eff(p, "spr") * (0.25 + gdAmp * 0.15));
+      e = { ...e, statusEffects: [], witherStacks: 0 };
+      if (gdDmg > 0) {
+        e.hp = Math.max(0, e.hp - gdDmg);
+        p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + gdDmg };
+        logs.push(`💣 Grand Detonation: ${gdDmg} dmg (${gdCount} charges)`);
+        spawnFloat(`${gdDmg}`, "#e74c3c", "enemy");
+        triggerShake("enemy");
+        const gdHeal = Math.floor(gdDmg * 0.20);
+        if (gdHeal > 0) { p.hp = Math.min(p.maxHp, p.hp + gdHeal); p.combatHealTotal = (p.combatHealTotal || 0) + gdHeal; p.runStats = { ...p.runStats, dmgHealed: (p.runStats?.dmgHealed||0) + gdHeal }; logs.push(`💣 Grand Detonation: +${gdHeal} HP`); spawnFloat(`+${gdHeal}`, "#2ecc71", "player"); }
+      } else {
+        logs.push(`💣 Grand Detonation: No charges! Use Caustic Injection or Incendiary Round first.`);
+      }
+      p.catalystConsumed = 0;
 
     } else {
       // All attack moves
@@ -1154,6 +1273,13 @@ export default function RPGGame() {
           wrathBonus = 1 + boosts * 0.05 * (1 + pathSkillVal(p, "wrath_amp") * 0.15);
         }
 
+        // Chaos Engineer (Artificier base passive): +10% dmg per active status on enemy
+        const isArtificierClass = p.classKey === "artificier" || p.multiclassKey === "artificier";
+        const chaosCount = isArtificierClass
+          ? (e.statusEffects || []).filter(s => ["burn","bleed","poison","stun","curse"].includes(s.type)).length
+            + ((e.witherStacks || 0) > 0 ? 1 : 0)
+          : 0;
+
         let totalDmg = 0;
         for (let h = 0; h < hits; h++) {
           const isLastHit = h === hits - 1;
@@ -1189,6 +1315,11 @@ export default function RPGGame() {
           }
         }
 
+        // Apply Chaos Engineer multiplier after totalDmg is finalized
+        if (chaosCount > 0) {
+          totalDmg = Math.floor(totalDmg * (1 + chaosCount * 0.10));
+          logs.push(`🧪 Chaos Engineer: +${chaosCount * 10}% dmg (${chaosCount} statuses)`);
+        }
         e.hp = Math.max(0, e.hp - totalDmg);
         p.runStats = { ...p.runStats, dmgDealt: (p.runStats?.dmgDealt||0) + totalDmg };
         logs.push(`${crit ? "⚡ CRIT! " : ""}${move.name}: ${totalDmg} dmg${hits > 1 ? ` (${hits}×)` : ""}`);
@@ -1306,6 +1437,80 @@ export default function RPGGame() {
           if (move.id === "death_coil" && pathSkillVal(p, "coil_bleed") >= 1) {
             e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35)));
             logs.push("🩸 Bleed applied (Coil)!");
+          }
+        }
+        // burn+bleed (thermite — Maniac path)
+        if (move.effect === "burn+bleed") {
+          e = applyEffect(e, "burn", Math.max(1, Math.floor(eff(p,"spr") * 0.25)));
+          logs.push("🔥 Burn applied!");
+          const bbDotDur = pathSkillVal(p, "dot_duration");
+          if (bbDotDur > 0) e = { ...e, statusEffects: e.statusEffects.map(s => s.type === "burn"  ? { ...s, turns: s.turns + bbDotDur } : s) };
+          if (p.pathKey === "maniac" && p.classKey === "artificier") { const ovDmg = Math.floor(eff(p,"spr")*(0.15+pathSkillVal(p,"overload_amp")*0.01)); if(ovDmg>0){e.hp=Math.max(0,e.hp-ovDmg);p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ovDmg};logs.push(`💥 Overload: ${ovDmg} dmg`);spawnFloat(`${ovDmg}`,"#e74c3c","enemy");} }
+          const bbBleedAmp = pathSkillVal(p, "bleed_amp");
+          e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35 * (1 + bbBleedAmp * 0.03))));
+          logs.push("🩸 Bleed applied!");
+          if (bbDotDur > 0) e = { ...e, statusEffects: e.statusEffects.map(s => s.type === "bleed" ? { ...s, turns: s.turns + bbDotDur } : s) };
+          if (p.pathKey === "maniac" && p.classKey === "artificier") { const ovDmg = Math.floor(eff(p,"spr")*(0.15+pathSkillVal(p,"overload_amp")*0.01)); if(ovDmg>0){e.hp=Math.max(0,e.hp-ovDmg);p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ovDmg};logs.push(`💥 Overload: ${ovDmg} dmg`);spawnFloat(`${ovDmg}`,"#e74c3c","enemy");} }
+          if (pathSkillVal(p, "triple_threat") >= 1) {
+            const ttPDmg = calcPoisonDmg(p);
+            const ttPDur = 4 + pathSkillVal(p, "dot_duration");
+            e = applyEffect(e, "poison", ttPDmg, { duration: ttPDur });
+            logs.push(`🧪 Triple Threat: Poison! (${ttPDmg}/turn)`);
+            if (p.pathKey === "maniac" && p.classKey === "artificier") { const ovDmg = Math.floor(eff(p,"spr")*(0.15+pathSkillVal(p,"overload_amp")*0.01)); if(ovDmg>0){e.hp=Math.max(0,e.hp-ovDmg);p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ovDmg};logs.push(`💥 Overload: ${ovDmg} dmg`);spawnFloat(`${ovDmg}`,"#e74c3c","enemy");} }
+          }
+        }
+        // bleed+poison (fragmentation — Maniac path)
+        if (move.effect === "bleed+poison") {
+          const bpBleedAmp = pathSkillVal(p, "bleed_amp");
+          e = applyEffect(e, "bleed", Math.max(1, Math.floor(eff(p,"atk") * 0.35 * (1 + bpBleedAmp * 0.03))));
+          logs.push("🩸 Bleed applied!");
+          const bpDotDur = pathSkillVal(p, "dot_duration");
+          if (bpDotDur > 0) e = { ...e, statusEffects: e.statusEffects.map(s => s.type === "bleed" ? { ...s, turns: s.turns + bpDotDur } : s) };
+          if (p.pathKey === "maniac" && p.classKey === "artificier") { const ovDmg = Math.floor(eff(p,"spr")*(0.15+pathSkillVal(p,"overload_amp")*0.01)); if(ovDmg>0){e.hp=Math.max(0,e.hp-ovDmg);p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ovDmg};logs.push(`💥 Overload: ${ovDmg} dmg`);spawnFloat(`${ovDmg}`,"#e74c3c","enemy");} }
+          const bpPoisonDmg = calcPoisonDmg(p);
+          const bpPoisonDur = 4 + pathSkillVal(p, "dot_duration");
+          e = applyEffect(e, "poison", bpPoisonDmg, { duration: bpPoisonDur });
+          logs.push(`🧪 Poison applied! (${bpPoisonDmg}/turn)`);
+          if (p.pathKey === "maniac" && p.classKey === "artificier") { const ovDmg = Math.floor(eff(p,"spr")*(0.15+pathSkillVal(p,"overload_amp")*0.01)); if(ovDmg>0){e.hp=Math.max(0,e.hp-ovDmg);p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ovDmg};logs.push(`💥 Overload: ${ovDmg} dmg`);spawnFloat(`${ovDmg}`,"#e74c3c","enemy");} }
+        }
+        // apply_poison+consume_burn (caustic_injection — Catalyst path)
+        if (move.effect === "apply_poison+consume_burn") {
+          const ciPDmg = calcPoisonDmg(p);
+          const ciPDur = 4 + pathSkillVal(p, "dot_duration");
+          e = applyEffect(e, "poison", ciPDmg, { duration: ciPDur });
+          logs.push(`🧪 Poison applied! (${ciPDmg}/turn)`);
+          const ciBurnIdx = (e.statusEffects || []).findIndex(s => s.type === "burn");
+          if (ciBurnIdx >= 0) {
+            e = { ...e, statusEffects: e.statusEffects.filter((_, i) => i !== ciBurnIdx) };
+            logs.push("🔥 Burn consumed!");
+            if (p.pathKey === "catalyst" && p.classKey === "artificier") {
+              const ciConsumeAmp = pathSkillVal(p, "consume_amp");
+              const ciIgniteDmg  = Math.floor(eff(p,"spr") * 0.15 * (1 + ciConsumeAmp * 0.10));
+              const ciIgniteHeal = Math.floor(eff(p,"spr") * (0.10 + pathSkillVal(p,"ignition_amp") * 0.02));
+              if (ciIgniteDmg > 0) { e.hp=Math.max(0,e.hp-ciIgniteDmg); p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ciIgniteDmg}; logs.push(`⚗️ Ignition: ${ciIgniteDmg} dmg`); spawnFloat(`${ciIgniteDmg}`,"#e8c070","enemy"); }
+              if (ciIgniteHeal > 0) { p.hp=Math.min(p.maxHp,p.hp+ciIgniteHeal); p.combatHealTotal=(p.combatHealTotal||0)+ciIgniteHeal; p.runStats={...p.runStats,dmgHealed:(p.runStats?.dmgHealed||0)+ciIgniteHeal}; logs.push(`⚗️ Ignition: +${ciIgniteHeal} HP`); spawnFloat(`+${ciIgniteHeal}`,"#2ecc71","player"); }
+              p.catalystConsumed = (p.catalystConsumed || 0) + 1;
+            }
+          }
+        }
+        // apply_burn+consume_bleed (incendiary_round — Catalyst path)
+        if (move.effect === "apply_burn+consume_bleed") {
+          const ibDotDur = pathSkillVal(p, "dot_duration");
+          e = applyEffect(e, "burn", Math.max(1, Math.floor(eff(p,"spr") * 0.25)));
+          logs.push("🔥 Burn applied!");
+          if (ibDotDur > 0) e = { ...e, statusEffects: e.statusEffects.map(s => s.type === "burn" ? { ...s, turns: s.turns + ibDotDur } : s) };
+          const ibBleedIdx = (e.statusEffects || []).findIndex(s => s.type === "bleed");
+          if (ibBleedIdx >= 0) {
+            e = { ...e, statusEffects: e.statusEffects.filter((_, i) => i !== ibBleedIdx) };
+            logs.push("🩸 Bleed consumed!");
+            if (p.pathKey === "catalyst" && p.classKey === "artificier") {
+              const ibConsumeAmp = pathSkillVal(p, "consume_amp");
+              const ibIgniteDmg  = Math.floor(eff(p,"spr") * 0.15 * (1 + ibConsumeAmp * 0.10));
+              const ibIgniteHeal = Math.floor(eff(p,"spr") * (0.10 + pathSkillVal(p,"ignition_amp") * 0.02));
+              if (ibIgniteDmg > 0) { e.hp=Math.max(0,e.hp-ibIgniteDmg); p.runStats={...p.runStats,dmgDealt:(p.runStats?.dmgDealt||0)+ibIgniteDmg}; logs.push(`⚗️ Ignition: ${ibIgniteDmg} dmg`); spawnFloat(`${ibIgniteDmg}`,"#e8c070","enemy"); }
+              if (ibIgniteHeal > 0) { p.hp=Math.min(p.maxHp,p.hp+ibIgniteHeal); p.combatHealTotal=(p.combatHealTotal||0)+ibIgniteHeal; p.runStats={...p.runStats,dmgHealed:(p.runStats?.dmgHealed||0)+ibIgniteHeal}; logs.push(`⚗️ Ignition: +${ibIgniteHeal} HP`); spawnFloat(`+${ibIgniteHeal}`,"#2ecc71","player"); }
+              p.catalystConsumed = (p.catalystConsumed || 0) + 1;
+            }
           }
         }
         // multicast (Lightning): chance to cast again
