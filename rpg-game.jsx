@@ -185,9 +185,7 @@ function calcMoveDmg(move, player, enemy) {
   else if (move.dmgType === "magical")  atkStat = eff(player, "spr");
   else                                   atkStat = eff(player, "mnd");
   if (move.dmgType === "mixed") {
-    const physPart = calcPhysDmg(eff(player, "atk"), penDef, move.power);
-    const magPart  = calcMagDmg(eff(player, "spr"), enemy.mnd, move.power);
-    return Math.floor((physPart + magPart) / 2);
+    return Math.floor((eff(player, "atk") + eff(player, "spr")) * move.power);
   }
   if (move.dmgType === "chi")  return calcChiDmg(ss ? atkStat : eff(player, "mnd"), penDef, move.power);
   if (move.dmgType === "void") return calcVoidDmg(eff(player, "mnd"), enemy.mnd, move.power);
