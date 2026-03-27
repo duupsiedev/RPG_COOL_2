@@ -157,6 +157,8 @@ function applyPath(player, pathKey) {
     yinStacks: 0, yangStacks: 0,
     harmonyBoosts: player.harmonyBoosts || 0,
     moveCooldowns: {}, combatHealTotal: 0,
+    maxHp: player.maxHp + 100,
+    hp: Math.min(player.hp + 100, player.maxHp + 100),
   };
 }
 
@@ -1325,6 +1327,7 @@ export default function RPGGame() {
       const gold = Math.floor(e.reward.gold * skillGoldMult(p));
       const exp  = Math.floor(e.reward.exp  * skillXpMult(p));
       p.gold += gold; p.exp += exp; p.wins += 1;
+      p.maxHp += 5; // +5 max HP per win — sustains survivability vs exponential enemy scaling
       logs.push(`💀 ${e.name} defeated! +${exp} EXP +${gold} Gold`);
 
       // Passives on kill — runs for classKey AND multiclassKey if present
@@ -1446,6 +1449,7 @@ export default function RPGGame() {
         const gold = Math.floor(e2.reward.gold * skillGoldMult(p2));
         const exp  = Math.floor(e2.reward.exp  * skillXpMult(p2));
         p2.gold += gold; p2.exp += exp; p2.wins += 1;
+        p2.maxHp += 5; // +5 max HP per win
         eLogs.push(`💀 ${e2.name} defeated${note}! +${exp} EXP +${gold} Gold`);
         // Passives on kill
         const passiveKeys = p2.isSpecialized ? [p2.classKey] : [p2.classKey, p2.multiclassKey].filter(Boolean);

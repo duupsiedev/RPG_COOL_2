@@ -151,6 +151,8 @@ export function applyMulticlass(player, secondClassKey) {
     isSpecialized: isSpec,
     combinedScaling: newScaling,
     passiveWins2: 0,
+    maxHp: player.maxHp + 100,
+    hp: Math.min(player.hp + 100, player.maxHp + 100),
   };
 }
 
