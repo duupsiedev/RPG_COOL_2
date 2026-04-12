@@ -1536,7 +1536,8 @@ export default function RPGGame() {
       const gold = Math.floor(e.reward.gold * skillGoldMult(p));
       const exp  = Math.floor(e.reward.exp  * skillXpMult(p));
       p.gold += gold; p.exp += exp; p.wins += 1;
-      p.maxHp += 5; // +5 max HP per win — sustains survivability vs exponential enemy scaling
+      p.maxHp += 10;
+      if (p.wins % 25 === 0) p.maxHp += 100;
       logs.push(`💀 ${e.name} defeated! +${exp} EXP +${gold} Gold`);
 
       // Passives on kill — runs for classKey AND multiclassKey if present
@@ -1626,7 +1627,7 @@ export default function RPGGame() {
         p.stats = ns;
         // Use pathHpScaling if path chosen, else base hpScaling
         const hpScaling = p.pathHpScaling || getClass(p.classKey).hpScaling || 1;
-        const hpGain = Math.floor(15 * hpScaling);
+        const hpGain = Math.floor(20 * hpScaling);
         p.maxHp += hpGain; p.hp = Math.min(p.maxHp, p.hp + Math.floor(p.maxHp * 0.5));
         p.skillPoints = (p.skillPoints || 0) + 2;
         logs.push(`🎉 LEVEL UP → ${p.level}! ${desc.join(" ")} +2 SP`);
@@ -1657,7 +1658,8 @@ export default function RPGGame() {
         const gold = Math.floor(e2.reward.gold * skillGoldMult(p2));
         const exp  = Math.floor(e2.reward.exp  * skillXpMult(p2));
         p2.gold += gold; p2.exp += exp; p2.wins += 1;
-        p2.maxHp += 5; // +5 max HP per win
+        p2.maxHp += 10;
+        if (p2.wins % 25 === 0) p2.maxHp += 100;
         eLogs.push(`💀 ${e2.name} defeated${note}! +${exp} EXP +${gold} Gold`);
         // Passives on kill
         const passiveKeys = p2.isSpecialized ? [p2.classKey] : [p2.classKey, p2.multiclassKey].filter(Boolean);
@@ -1718,7 +1720,7 @@ export default function RPGGame() {
           });
           p2.stats = ns;
           const hpScaling = p2.pathHpScaling || getClass(p2.classKey).hpScaling || 1;
-          const hpGain = Math.floor(15 * hpScaling);
+          const hpGain = Math.floor(20 * hpScaling);
           p2.maxHp += hpGain; p2.hp = Math.min(p2.maxHp, p2.hp + Math.floor(p2.maxHp * 0.5));
           p2.skillPoints = (p2.skillPoints || 0) + 2;
           eLogs.push(`🎉 LEVEL UP → ${p2.level}! ${desc.join(" ")} +2 SP`);
