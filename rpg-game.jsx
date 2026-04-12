@@ -11,12 +11,18 @@ const SAVE_KEY = "realm_of_echoes_save_v1";
 // HELPERS
 // ============================================================
 
+function winMultiplier(wins) {
+  let mult = 1, remaining = wins, segment = 0;
+  while (remaining > 0) {
+    const rate = 1.015 + 0.01 * segment;
+    mult *= Math.pow(rate, Math.min(remaining, 25));
+    remaining -= 25; segment++;
+  }
+  return mult;
+}
+
 function scaleEnemy(template, wins, playerLevel = 1) {
-  const winMult = wins <= 50
-  ? Math.pow(1.015, wins)
-  : wins <= 100
-    ? Math.pow(1.015, 50) * Math.pow(1.025, wins - 50)
-    : Math.pow(1.015, 50) * Math.pow(1.025, 50) * Math.pow(1.035, wins - 100);
+  const winMult = winMultiplier(wins);
   const lvlMult = Math.pow(1.12, playerLevel - 1);
   const s = winMult * lvlMult;
   const earlyHpFactor = wins <= 25 ? (0.70 + 0.30 * wins / 25) : 1.0;
@@ -1605,7 +1611,6 @@ export default function RPGGame() {
         p.expToNext = Math.floor(p.expToNext * 1.30);
         const baseStats = getClass(p.classKey).stats;
         const secondStats = p.multiclassKey ? getClass(p.multiclassKey).stats : null;
-        const pctBonus = 0.02 * (p.level - 1);
         const scalingMult = p.combinedScaling
           ? p.combinedScaling / getClass(p.classKey).baseScaling
           : 1;
@@ -1615,7 +1620,7 @@ export default function RPGGame() {
           const blendedBase = secondStats
             ? (baseStats[s] + secondStats[s]) / 2
             : baseStats[s];
-          const g = Math.ceil(blendedBase * (0.25 + pctBonus) * scalingMult);
+          const g = Math.ceil(blendedBase * Math.pow(1.08, p.level - 1) * scalingMult);
           ns[s] += g; desc.push(`${s.toUpperCase()}+${g}`);
         });
         p.stats = ns;
@@ -1703,13 +1708,12 @@ export default function RPGGame() {
           p2.expToNext = Math.floor(p2.expToNext * 1.30);
           const baseStats = getClass(p2.classKey).stats;
           const secondStats = p2.multiclassKey ? getClass(p2.multiclassKey).stats : null;
-          const pctBonus = 0.02 * (p2.level - 1);
           const scalingMult = p2.combinedScaling ? p2.combinedScaling / getClass(p2.classKey).baseScaling : 1;
           const ns = { ...p2.stats };
           const desc = [];
           Object.keys(ns).forEach(s => {
             const blendedBase = secondStats ? (baseStats[s] + secondStats[s]) / 2 : baseStats[s];
-            const g = Math.ceil(blendedBase * (0.25 + pctBonus) * scalingMult);
+            const g = Math.ceil(blendedBase * Math.pow(1.08, p2.level - 1) * scalingMult);
             ns[s] += g; desc.push(`${s.toUpperCase()}+${g}`);
           });
           p2.stats = ns;
