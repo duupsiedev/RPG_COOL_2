@@ -4,7 +4,13 @@ import { resolvePlayerMove } from "./abilities.js";
 // Explicit ports keep React, storage and real timers outside the game rules.
 // Timing/cancellation semantics intentionally remain unchanged in Phase 2.
 export function createCombatController(state, effects) {
-  const ports = { random: Math.random, schedule: setTimeout, ...effects };
+  // Native browser timers must not receive the ports object as their `this`.
+  // A wrapper is safe both as ports.schedule(...) and as a detached callback.
+  const ports = {
+    random: Math.random,
+    schedule: (callback, delay) => globalThis.setTimeout(callback, delay),
+    ...effects,
+  };
   const { setScreen, setEnemy, setLog, setPhase, setPlayerTurn, setBusy, setPlayer, addLog } = ports;
   function beginCombat(p) {
     // Show multiclass screen after first boss (win 25) if not yet multiclassed

@@ -69,7 +69,7 @@ the timing phase, rather than treating it as a simulator.
 
 Validation after extraction:
 
-- 31 passing tests, including the 252-scenario parity test; seven expected TODO
+- 33 passing tests, including the 252-scenario parity test; seven expected TODO
   failures remain visible and excluded from the failing exit status.
 - Production Vite build passes.
 - Actual React server rendering of the main menu through Vite succeeds.
@@ -78,6 +78,23 @@ Validation after extraction:
 - Interactive browser testing was unavailable: the browser tool reported no
   connected browser. Server rendering does not verify clicks, autosave effects,
   StrictMode lifecycle, or visual layout.
+
+### Follow-up: victory stall regression
+
+The initial extraction assigned native `setTimeout` directly to `ports.schedule`.
+Calling it as `ports.schedule(...)` during victory supplies the ports object as
+the receiver, which browser timers can reject with `TypeError: Illegal invocation`.
+This interrupts victory before publishing HP/player state and scheduling the next
+encounter. The original injected scheduler and Node timers did not catch it.
+
+The default scheduler now wraps `globalThis.setTimeout`, preserving its receiver
+and all existing delays. Two regression tests reproduce browser receiver checks
+without overriding the controller's default scheduler. Both direct and status
+kills failed before the fix and pass afterward, including HP publication, rewards,
+next-encounter transition, and reward-notice cleanup. The production build and all
+252 parity scenarios also pass. This fixes a refactoring regression, not one of
+the seven pre-existing gameplay/save/timing TODOs. Live browser confirmation is
+still outstanding.
 
 ## Deferred behavior changes
 
