@@ -1,0 +1,74 @@
+Le path se debloque APRES avoir battue le 2 iem boss a la win 50, elle debloque deux choix de class, remplace le move 1 et 2 avec les nouveau de la classe Path et rename le defensive skill. Il remplace aussi le passive de la classe de base (pas celui de la multiclasse) si tu avais specialized tu recois le new passive x 2. Path debloque aussi un tab Journey, journey a une bare d'exp a elle meme, elle a un max de trentre niveau, journey eslt la ou tu retrouve les paths skill, aller j'usquau niv 15 est relativement rapide alors que de 15-30 est relativement lent, tu recois 1 journey skill par niveau de journey, ils servent a acheter les path skills. Finalement path augmente de 50% le scaling du combined(multiclass) scaling AINSI que le hp scaling.
+
+
+
+
+KIGHT PATHS
+
+1 -- Commander--New Passive -- Leader : Restore 20 hp + 5% def scaling, each turn
+  -- New moves : Stronghold : scales with def(does phys dmg) stun
+                 Veteran Blow : Scales with def, bleeds
+                 IronClad(changes fortify name no new effect)
+Path skills: Convert Atk to def (5% per point max 10)
+             Heals portion of dmg received (3% per point max 10)
+             Stronghold activates Ironclad(10 points max 1)
+
+2 -- Radiant Knight -- New Passive -- Sun Child : Apply burn each turn,very small heal per burn dmg
+ 
+-- New moves -- Radiance : moderate power(magic dmg), apply burn Stack(more burn dmg, max 6)
+             -- Immolate : Consume burn for burst(more stack more dmg)
+             -- Flame shield : Replaces fortify no new effects
+Path Skills : Convert atk to spirit (5% per point max 10)
+              Buff burn heal (1% per point max 10)
+              More burn dmg (2% per point max 10)
+
+
+RANGER PATHS
+
+RANGER
+Path A — Deadeye (Enhanced Ranger):
+Amplifies what Ranger already does — bleed and multi-hit.
+
+New Passive — Bloodhound: Predator heal doubles when enemy is bleeding. Rewards keeping bleed up constantly.
+New Moves:
+
+Piercing Shot: Physical, high power, ignores 30% of enemy DEF. Scales ATK.
+Rain of Arrows: 3 hits, lower power per hit, applies bleed on last hit.
+Replaces Quick Shot and Bleed Arrow
+
+
+Path Skills:
+
+Bleed deals +3% more damage per point (max 10)
+Predator heals +2% more per point (max 10)
+Rain of Arrows fires +1 extra arrow (10 points, max 1) — all-in skill
+
+
+
+Path B — Ghost (Transformed Ranger):
+Flips identity completely — forget bleed, become untouchable. AGI becomes everything.
+
+New Passive — Phantom Step: Every evade permanently gives +1 AGI, heals on eavade 10% max hp
+New Moves:
+
+Shadowstep: Def type, scales on agi instead of def+mnd
+Phantom Arrow: Damage scales purely on AGI instead of ATK
+
+
+
+Path Skills:
+
++2% Agi per point (max 10)
+On evade deal 40% ATK back as counter (max 10, +4% per point)
+Phantom Arrow +1 shot (10 points, max 1)
+
+
+MAGE PATHS
+
+1 -- Archmage passive : Ultimate knowledge : +1mnd every win, heals% based on mnd
+Meteor: HUGE dmg applies urn 3 turn cooldown
+Lightning bolt: Medium dmg %Multicast chance
+
+Path skills 15 point remove meteor cooldown
+5 point better multicast chance
+1 point +2% spirit(max 10)
